@@ -3,6 +3,36 @@ import type { CampaignRun, SourceInput, StyleProfile } from './agentEngine';
 const sourceKey = 'wlm.source';
 const styleKey = 'wlm.style';
 const runsKey = 'wlm.runs';
+const runtimeConfigKey = 'wlm.runtimeConfig';
+
+export type LlmProviderKey = 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'openrouter' | 'xai' | 'qwen' | 'kimi';
+export type SearchProviderKey = 'tavily' | 'serper' | 'brave' | 'exa' | 'bing' | 'googleCse';
+
+export type RuntimeConfig = {
+  llmKeys: Record<LlmProviderKey, string>;
+  searchKeys: Record<SearchProviderKey, string>;
+};
+
+const defaultRuntimeConfig: RuntimeConfig = {
+  llmKeys: {
+    openai: '',
+    anthropic: '',
+    gemini: '',
+    deepseek: '',
+    openrouter: '',
+    xai: '',
+    qwen: '',
+    kimi: '',
+  },
+  searchKeys: {
+    tavily: '',
+    serper: '',
+    brave: '',
+    exa: '',
+    bing: '',
+    googleCse: '',
+  },
+};
 
 export function loadSource(): SourceInput {
   return read(sourceKey, {
@@ -23,12 +53,33 @@ export function loadStyleSamples(): string {
   );
 }
 
+export function loadRuntimeConfig(): RuntimeConfig {
+  const stored = read<Partial<RuntimeConfig> & Record<string, unknown>>(runtimeConfigKey, {});
+  const migrated = {
+    llmKeys: { ...defaultRuntimeConfig.llmKeys, ...(stored.llmKeys || {}) },
+    searchKeys: { ...defaultRuntimeConfig.searchKeys, ...(stored.searchKeys || {}) },
+  };
+
+  if (typeof stored.llmProvider === 'string' && typeof stored.llmApiKey === 'string' && stored.llmProvider in migrated.llmKeys) {
+    migrated.llmKeys[stored.llmProvider as LlmProviderKey] ||= stored.llmApiKey;
+  }
+  if (typeof stored.searchProvider === 'string' && typeof stored.searchApiKey === 'string' && stored.searchProvider in migrated.searchKeys) {
+    migrated.searchKeys[stored.searchProvider as SearchProviderKey] ||= stored.searchApiKey;
+  }
+
+  return migrated;
+}
+
 export function saveSource(input: SourceInput): void {
   localStorage.setItem(sourceKey, JSON.stringify(input));
 }
 
 export function saveStyleSamples(samples: string): void {
   localStorage.setItem(styleKey, JSON.stringify(samples));
+}
+
+export function saveRuntimeConfig(config: RuntimeConfig): void {
+  localStorage.setItem(runtimeConfigKey, JSON.stringify(config));
 }
 
 export function loadRuns(): CampaignRun[] {

@@ -12,6 +12,7 @@ import {
   MessageSquareText,
   PenLine,
   Search,
+  Settings2,
   Rocket,
   Sparkles,
   Target,
@@ -29,7 +30,20 @@ import {
   type PlatformAsset,
   type SourceInput,
 } from './agentEngine';
-import { exportMarkdown, loadRuns, loadSource, loadStyleSamples, saveRuns, saveSource, saveStyleSamples } from './storage';
+import {
+  exportMarkdown,
+  loadRuntimeConfig,
+  loadRuns,
+  loadSource,
+  loadStyleSamples,
+  saveRuntimeConfig,
+  saveRuns,
+  saveSource,
+  saveStyleSamples,
+  type LlmProviderKey,
+  type RuntimeConfig,
+  type SearchProviderKey,
+} from './storage';
 
 const agents = [
   { name: 'User Research Agent', detail: '建立用户画像，并给出真实用户搜索线索。', icon: Users },
@@ -53,6 +67,7 @@ const scoreLabels: Record<string, string> = {
 
 const workflowSteps = [
   { id: 'input', title: 'Start', description: '输入 URL 或文本' },
+  { id: 'config', title: 'Config', description: '配置模型和搜索' },
   { id: 'research', title: 'Research', description: '确认用户和知识库' },
   { id: 'angles', title: 'Angles', description: '选择选题角度' },
   { id: 'style', title: 'Voice', description: '确认作者风格' },
@@ -63,10 +78,31 @@ const workflowSteps = [
 
 type WorkflowStepId = (typeof workflowSteps)[number]['id'];
 
+const llmProviders: { key: LlmProviderKey; name: string; hint: string }[] = [
+  { key: 'openai', name: 'OpenAI', hint: 'GPT-4.1 / GPT-4o / o-series' },
+  { key: 'anthropic', name: 'Anthropic', hint: 'Claude Sonnet / Opus' },
+  { key: 'gemini', name: 'Google Gemini', hint: 'Gemini 1.5 / 2.x' },
+  { key: 'deepseek', name: 'DeepSeek', hint: 'DeepSeek Chat / Reasoner' },
+  { key: 'openrouter', name: 'OpenRouter', hint: 'Multi-model routing' },
+  { key: 'xai', name: 'xAI', hint: 'Grok models' },
+  { key: 'qwen', name: 'Alibaba Qwen', hint: 'Qwen / DashScope' },
+  { key: 'kimi', name: 'Moonshot Kimi', hint: 'Kimi / Moonshot' },
+];
+
+const searchProviders: { key: SearchProviderKey; name: string; hint: string }[] = [
+  { key: 'tavily', name: 'Tavily', hint: 'AI search and crawl' },
+  { key: 'serper', name: 'Serper', hint: 'Google SERP API' },
+  { key: 'brave', name: 'Brave Search', hint: 'Web search API' },
+  { key: 'exa', name: 'Exa', hint: 'Neural web search' },
+  { key: 'bing', name: 'Bing Search', hint: 'Microsoft search API' },
+  { key: 'googleCse', name: 'Google CSE', hint: 'Programmable Search' },
+];
+
 export function App() {
   const [source, setSource] = useState<SourceInput>(() => loadSource());
   const [styleSamples, setStyleSamples] = useState(() => loadStyleSamples());
   const [runs, setRuns] = useState<CampaignRun[]>(() => loadRuns());
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(() => loadRuntimeConfig());
   const [selectedAngleId, setSelectedAngleId] = useState<string | undefined>(runs[0]?.selectedAngleId);
   const [activePlatform, setActivePlatform] = useState(0);
   const [activeStep, setActiveStep] = useState<WorkflowStepId>('input');
@@ -77,6 +113,8 @@ export function App() {
   const currentRun = runs[0]?.research && runs[0]?.versions ? runs[0] : fallbackRun;
   const selectedAngle = currentRun.angles.find((angle) => angle.id === currentRun.selectedAngleId) ?? currentRun.angles[0];
   const activeAsset = currentRun.assets[activePlatform] ?? currentRun.assets[0];
+  const llmKeyCount = Object.values(runtimeConfig.llmKeys).filter(Boolean).length;
+  const searchKeyCount = Object.values(runtimeConfig.searchKeys).filter(Boolean).length;
 
   function updateSource(key: keyof SourceInput, value: string) {
     const next = { ...source, [key]: value };
@@ -87,6 +125,20 @@ export function App() {
   function updateStyleSamples(value: string) {
     setStyleSamples(value);
     saveStyleSamples(value);
+  }
+
+  function updateRuntimeConfig<K extends keyof RuntimeConfig>(key: K, value: RuntimeConfig[K]) {
+    const next = { ...runtimeConfig, [key]: value };
+    setRuntimeConfig(next);
+    saveRuntimeConfig(next);
+  }
+
+  function updateLlmKey(provider: LlmProviderKey, value: string) {
+    updateRuntimeConfig('llmKeys', { ...runtimeConfig.llmKeys, [provider]: value });
+  }
+
+  function updateSearchKey(provider: SearchProviderKey, value: string) {
+    updateRuntimeConfig('searchKeys', { ...runtimeConfig.searchKeys, [provider]: value });
   }
 
   function generate(angleId = selectedAngleId) {
@@ -168,6 +220,10 @@ export function App() {
             <History size={17} />
             Runs
           </a>
+          <a href="#workflow" onClick={() => setActiveStep('config')}>
+            <Settings2 size={17} />
+            Settings
+          </a>
         </nav>
 
         <div className="sidebar-note">
@@ -186,7 +242,7 @@ export function App() {
             <button className="icon-button" onClick={downloadRun} title="Export campaign">
               <Download size={18} />
             </button>
-            <button className="primary-button" onClick={() => generateAndGo('research')}>
+            <button className="primary-button" onClick={() => setActiveStep('config')}>
               <Sparkles size={18} />
               Start Flow
             </button>
@@ -233,8 +289,8 @@ export function App() {
                 title="从一个 URL 或一段文本开始"
                 description="你可以只填 URL 或 source notes。其他字段可以留空，后续 workflow 会给出推断结果。"
                 action={
-                  <button className="primary-button" onClick={() => generateAndGo('research')}>
-                    Build research dossier
+                  <button className="primary-button" onClick={() => setActiveStep('config')}>
+                    Configure retrieval
                     <ArrowRight size={18} />
                   </button>
                 }
@@ -264,10 +320,74 @@ export function App() {
               </FlowCard>
             )}
 
+            {activeStep === 'config' && (
+              <FlowCard
+                icon={<Settings2 size={19} />}
+                kicker="Step 2"
+                title="配置大模型和外部搜索 API"
+                description="当前版本默认只使用本地规则引擎。这里只需要填各平台 API key，后续接入真实联网检索和模型生成时直接读取这些 key。"
+                action={
+                  <button className="primary-button" onClick={() => generateAndGo('research')}>
+                    Confirm config
+                    <ArrowRight size={18} />
+                  </button>
+                }
+              >
+                <div className="config-banner">
+                  <strong>{llmKeyCount || searchKeyCount ? 'API keys configured' : 'Local rules only'}</strong>
+                  <span>
+                    {llmKeyCount || searchKeyCount
+                      ? `${llmKeyCount} 个 LLM key，${searchKeyCount} 个 Search key 已保存到本地浏览器。`
+                      : '当前不会调用外部模型或搜索。Research Dossier 是本地推断，Real User Leads 是建议搜索 query。'}
+                  </span>
+                </div>
+                <div className="provider-section">
+                  <div className="provider-heading">
+                    <h3>Mainstream LLM APIs</h3>
+                    <span>只填 key，模型和 endpoint 使用默认适配。</span>
+                  </div>
+                  <div className="settings-grid provider-grid">
+                    {llmProviders.map((provider) => (
+                      <label className="provider-key-card" key={provider.key}>
+                        <span>{provider.name}</span>
+                        <small>{provider.hint}</small>
+                        <input
+                          type="password"
+                          placeholder={`${provider.name} API key`}
+                          value={runtimeConfig.llmKeys[provider.key]}
+                          onChange={(event) => updateLlmKey(provider.key, event.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="provider-section">
+                  <div className="provider-heading">
+                    <h3>Mainstream Search APIs</h3>
+                    <span>用于真实用户搜索、网页检索和资料补充。</span>
+                  </div>
+                  <div className="settings-grid provider-grid">
+                    {searchProviders.map((provider) => (
+                      <label className="provider-key-card" key={provider.key}>
+                        <span>{provider.name}</span>
+                        <small>{provider.hint}</small>
+                        <input
+                          type="password"
+                          placeholder={`${provider.name} API key`}
+                          value={runtimeConfig.searchKeys[provider.key]}
+                          onChange={(event) => updateSearchKey(provider.key, event.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </FlowCard>
+            )}
+
             {activeStep === 'research' && (
               <FlowCard
                 icon={<Search size={19} />}
-                kicker="Step 2"
+                kicker="Step 3"
                 title="确认用户、内容知识库和需求地图"
                 description="这里像研究瀑布的第一层：先判断给谁写、他们知道什么、还缺什么，以及下一步应该去哪里找真实用户证据。"
                 action={
@@ -306,7 +426,7 @@ export function App() {
             {activeStep === 'angles' && (
               <FlowCard
                 icon={<Sparkles size={19} />}
-                kicker="Step 3"
+                kicker="Step 4"
                 title="选择一个选题角度"
                 description="每个角度会触发一次重新生成。你可以点卡片切换，然后确认进入作者风格。"
                 action={
@@ -335,7 +455,7 @@ export function App() {
             {activeStep === 'style' && (
               <FlowCard
                 icon={<PenLine size={19} />}
-                kicker="Step 4"
+                kicker="Step 5"
                 title="确认 Write Like Me 风格指纹"
                 description="补充过往文本会影响后续版本。确认后，workflow 会把选定角度改写成三种 X thread。"
                 action={
@@ -361,7 +481,7 @@ export function App() {
             {activeStep === 'draft' && (
               <FlowCard
                 icon={<MessageSquareText size={19} />}
-                kicker="Step 5"
+                kicker="Step 6"
                 title="查看三版 X thread"
                 description="A 稳妥专业，B 更有争议，C 更像本人。确认后进入多平台资产适配。"
                 action={
@@ -391,7 +511,7 @@ export function App() {
             {activeStep === 'assets' && (
               <FlowCard
                 icon={<Layers3 size={19} />}
-                kicker="Step 6"
+                kicker="Step 7"
                 title="多平台内容资产"
                 description="切换平台查看不同结构。可以先优化当前平台稿件，再进入评分复盘。"
                 action={
@@ -431,7 +551,7 @@ export function App() {
             {activeStep === 'score' && (
               <FlowCard
                 icon={<Gauge size={19} />}
-                kicker="Step 7"
+                kicker="Step 8"
                 title="评分、优化建议和导出"
                 description="这里是最终复盘：判断 hook、风格匹配、可信度和 AI 味风险。"
                 action={
