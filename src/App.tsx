@@ -115,6 +115,7 @@ export function App() {
   const activeAsset = currentRun.assets[activePlatform] ?? currentRun.assets[0];
   const llmKeyCount = Object.values(runtimeConfig.llmKeys).filter(Boolean).length;
   const searchKeyCount = Object.values(runtimeConfig.searchKeys).filter(Boolean).length;
+  const desktopInfo = typeof window !== 'undefined' ? window.writeLikeMeDesktop : undefined;
 
   function updateSource(key: keyof SourceInput, value: string) {
     const next = { ...source, [key]: value };
@@ -237,6 +238,7 @@ export function App() {
           <div>
             <p className="eyebrow">AI-native marketing execution for builders</p>
             <h1>Start with one URL or text. Move through the writing workflow step by step.</h1>
+            {desktopInfo && <p className="desktop-badge">Desktop app · Electron {desktopInfo.version} · {desktopInfo.platform}</p>}
           </div>
           <div className="topbar-actions">
             <button className="icon-button" onClick={downloadRun} title="Export campaign">
