@@ -1,0 +1,6 @@
+interface:
+  display_name: "Write Like Me Workflow"
+  short_description: "Research-first author-voice writing workflow"
+  default_prompt: "Use $write-like-me-workflow to turn this URL or text into researched, author-style-matched X thread versions."
+policy:
+  allow_implicit_invocation: true
