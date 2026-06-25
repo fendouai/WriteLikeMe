@@ -800,7 +800,7 @@ export function App() {
             )}
 
             <div className="flow-footer">
-              <button className="secondary-button" onClick={() => setActiveStep('input')}>
+              <button className="secondary-button" onClick={() => setActiveStep('news')}>
                 Start over
               </button>
               <button className="secondary-button" onClick={refreshCurrentStep}>
