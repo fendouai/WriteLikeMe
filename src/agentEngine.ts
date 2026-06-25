@@ -27,6 +27,37 @@ export type ResearchDossier = {
   authorProfile: ResearchItem[];
 };
 
+export type NewsSource = {
+  id: string;
+  name: string;
+  type: 'hotlist' | 'rss';
+};
+
+export type NewsItem = {
+  id: string;
+  title: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: NewsSource['type'];
+  url: string;
+  rank: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  seenCount: number;
+  isNew: boolean;
+  relevance: number;
+  summary: string;
+};
+
+export type NewsAggregation = {
+  refreshedAt: string;
+  refreshCount: number;
+  newCount: number;
+  updatedCount: number;
+  sources: NewsSource[];
+  items: NewsItem[];
+};
+
 export type StyleProfile = {
   tone: string[];
   rhythm: string;
@@ -42,6 +73,19 @@ export type Angle = {
   headline: string;
   rationale: string;
   hook: string;
+};
+
+export type TopicScoreDimension = {
+  label: string;
+  score: number;
+  rationale: string;
+};
+
+export type TopicEvaluation = {
+  overall: number;
+  verdict: string;
+  dimensions: TopicScoreDimension[];
+  recommendation: string;
 };
 
 export type PlatformAsset = {
@@ -108,6 +152,17 @@ const stopWords = new Set([
 
 const platforms: Platform[] = ['X Thread', 'LinkedIn', 'Newsletter', 'Xiaohongshu', 'Blog Outline'];
 
+const newsSources: NewsSource[] = [
+  { id: 'hacker-news', name: 'Hacker News', type: 'hotlist' },
+  { id: 'product-hunt', name: 'Product Hunt', type: 'hotlist' },
+  { id: 'github-trending', name: 'GitHub Trending', type: 'hotlist' },
+  { id: 'thepaper', name: '澎湃新闻', type: 'hotlist' },
+  { id: 'weibo', name: '微博热搜', type: 'hotlist' },
+  { id: 'zhihu', name: '知乎热榜', type: 'hotlist' },
+  { id: 'ruanyifeng', name: '阮一峰周刊', type: 'rss' },
+  { id: 'ai-newsletter', name: 'AI Newsletter', type: 'rss' },
+];
+
 export function analyzeStyle(samples: string): StyleProfile {
   const text = samples.trim();
   const sentences = splitSentences(text);
@@ -158,6 +213,75 @@ export function runCampaign(input: SourceInput, style: StyleProfile, selectedAng
     assets,
     scores,
     optimizationNotes,
+  };
+}
+
+export function refreshNewsAggregation(input: SourceInput, previous?: NewsAggregation): NewsAggregation {
+  const now = new Date().toISOString();
+  const previousItems = new Map((previous?.items || []).map((item) => [item.id, item]));
+  const generated = buildNewsItems(input, now);
+  let newCount = 0;
+  let updatedCount = 0;
+
+  const mergedItems = generated.map((item) => {
+    const existing = previousItems.get(item.id);
+    if (!existing) {
+      newCount += 1;
+      return item;
+    }
+    updatedCount += 1;
+    return {
+      ...item,
+      firstSeenAt: existing.firstSeenAt,
+      lastSeenAt: now,
+      seenCount: existing.seenCount + 1,
+      isNew: false,
+    };
+  });
+
+  const offListItems = [...previousItems.values()]
+    .filter((item) => !generated.some((next) => next.id === item.id))
+    .map((item) => ({ ...item, isNew: false }))
+    .slice(0, 6);
+
+  return {
+    refreshedAt: now,
+    refreshCount: (previous?.refreshCount || 0) + 1,
+    newCount,
+    updatedCount,
+    sources: newsSources,
+    items: [...mergedItems, ...offListItems].sort((a, b) => b.relevance - a.relevance).slice(0, 18),
+  };
+}
+
+export function evaluateTopic(angle: Angle, input: SourceInput, news: NewsAggregation): TopicEvaluation {
+  const text = `${input.title} ${input.sourceText} ${input.productContext} ${angle.headline}`;
+  const newsBoost = Math.min(12, news.items.filter((item) => item.isNew).length * 2 + news.refreshCount);
+  const hasSpecifics = /\d|github|product|saas|agent|workflow|api|开源|用户|增长|营销/i.test(text);
+  const debate = angle.id === 'contrarian' || angle.id === 'debate';
+  const dimensions: TopicScoreDimension[] = [
+    { label: '用户痛感', score: clampScore(72 + (hasSpecifics ? 10 : 0)), rationale: '读者是否正在被这个问题困扰，是否愿意停下来读。' },
+    { label: '新鲜度', score: clampScore(66 + newsBoost), rationale: '新闻聚合里新增内容越多，说明话题越有当下性。' },
+    { label: '观点差异', score: clampScore(70 + (debate ? 14 : 5)), rationale: '是否不是普通复述，而能提供清晰判断。' },
+    { label: '证据可得性', score: clampScore(64 + Math.min(18, news.items.length)), rationale: '是否容易找到来源、案例和真实用户语言。' },
+    { label: '传播钩子', score: clampScore(68 + angle.hook.length / 8), rationale: '首句是否有冲突、反差或强判断。' },
+    { label: '作者匹配', score: clampScore(76 + (input.productContext ? 8 : 0)), rationale: '是否适合作者长期表达和产品叙事。' },
+    { label: '平台适配', score: clampScore(74 + (angle.id === 'tool' ? 8 : 4)), rationale: '是否能自然拆成 thread、长文、社媒短帖。' },
+    { label: '商业价值', score: clampScore(70 + (/saas|product|founder|marketing|增长/i.test(text) ? 12 : 2)), rationale: '是否能带来产品认知、订阅、咨询或转化。' },
+    { label: '争议空间', score: clampScore(62 + (debate ? 20 : 6)), rationale: '是否能引发评论、反驳、补充经验。' },
+    { label: '执行难度', score: clampScore(82 - (news.items.length > 12 ? 4 : 0)), rationale: '分数越高代表越容易快速写出可信版本。' },
+  ];
+  const overall = Math.round(dimensions.reduce((sum, item) => sum + item.score, 0) / dimensions.length);
+  return {
+    overall,
+    verdict: overall >= 82 ? '强烈建议进入写作' : overall >= 72 ? '值得写，但需要补证据' : '暂缓，先继续观察',
+    dimensions,
+    recommendation:
+      overall >= 82
+        ? '选题有清晰用户痛点和传播钩子，可以直接进入作者风格适配。'
+        : overall >= 72
+          ? '建议先补 1-2 条真实用户证据，再进入写作。'
+          : '建议回到新闻聚合或角度选择，寻找更强信号。',
   };
 }
 
@@ -485,6 +609,65 @@ function buildOptimizationNotes(scores: ScoreCard, style: StyleProfile, angle: A
   if (scores.aiSmellRisk > 35) notes.push('Remove generic AI phrases and add one personal judgment or lived detail.');
   if (scores.platformFit < 80) notes.push('Shorten the first screen for social platforms and move context after the hook.');
   return notes;
+}
+
+function buildNewsItems(input: SourceInput, now: string): NewsItem[] {
+  const keywords = extractKeywords(`${input.title} ${input.sourceText} ${input.productContext}`, 8);
+  const topic = input.title || keywords.slice(0, 2).join(' ') || 'WriteLikeMe workflow';
+  const primary = keywords[0] || 'agent';
+  const secondary = keywords[1] || 'content';
+  const templates = [
+    `${topic}: builders are turning raw signals into repeatable content workflows`,
+    `New discussion: ${primary} tools shift from drafting to execution`,
+    `${secondary} teams ask for stronger voice control before publishing`,
+    `Open-source launch shows demand for lightweight marketing agents`,
+    `Creators compare AI writing tools with agent workspaces`,
+    `Founder workflow: one source becomes thread, newsletter, and launch copy`,
+    `Trend watch: personal voice becomes a scarce distribution asset`,
+    `User complaints cluster around generic AI summaries and weak angles`,
+    `Product teams want research, scoring, and review in one content loop`,
+    `RSS signal: workflow-first content systems gain attention this week`,
+  ];
+
+  return templates.map((title, index) => {
+    const source = newsSources[index % newsSources.length];
+    const url = `https://example.com/${source.id}/${slugify(title)}`;
+    const relevance = clampScore(92 - index * 3 + (title.toLowerCase().includes(primary) ? 4 : 0));
+    return {
+      id: `${source.id}:${normalizeNewsUrl(url)}`,
+      title,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceType: source.type,
+      url,
+      rank: index + 1,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      seenCount: 1,
+      isNew: true,
+      relevance,
+      summary: `${source.name} signal around ${primary}/${secondary}; useful as evidence or angle fuel.`,
+    };
+  });
+}
+
+function normalizeNewsUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    ['utm_source', 'utm_medium', 'utm_campaign', 'ref', 'source', '_t'].forEach((param) => parsed.searchParams.delete(param));
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
 }
 
 function inferAudience(text: string): string {

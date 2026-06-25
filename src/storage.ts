@@ -1,9 +1,10 @@
-import type { CampaignRun, SourceInput, StyleProfile } from './agentEngine';
+import type { CampaignRun, NewsAggregation, SourceInput, StyleProfile, TopicEvaluation } from './agentEngine';
 
 const sourceKey = 'wlm.source';
 const styleKey = 'wlm.style';
 const runsKey = 'wlm.runs';
 const runtimeConfigKey = 'wlm.runtimeConfig';
+const newsAggregationKey = 'wlm.newsAggregation';
 
 export type LlmProviderKey = 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'openrouter' | 'xai' | 'qwen' | 'kimi';
 export type SearchProviderKey = 'tavily' | 'serper' | 'brave' | 'exa' | 'bing' | 'googleCse';
@@ -82,6 +83,14 @@ export function saveRuntimeConfig(config: RuntimeConfig): void {
   localStorage.setItem(runtimeConfigKey, JSON.stringify(config));
 }
 
+export function loadNewsAggregation(): NewsAggregation | undefined {
+  return read<NewsAggregation | undefined>(newsAggregationKey, undefined);
+}
+
+export function saveNewsAggregation(news: NewsAggregation): void {
+  localStorage.setItem(newsAggregationKey, JSON.stringify(news));
+}
+
 export function loadRuns(): CampaignRun[] {
   return read(runsKey, []);
 }
@@ -90,12 +99,24 @@ export function saveRuns(runs: CampaignRun[]): void {
   localStorage.setItem(runsKey, JSON.stringify(runs.slice(0, 8)));
 }
 
-export function exportMarkdown(run: CampaignRun, profile: StyleProfile): string {
+export function exportMarkdown(run: CampaignRun, profile: StyleProfile, news?: NewsAggregation, topicEvaluation?: TopicEvaluation): string {
   return [
     `# WriteLikeMe Campaign`,
     '',
     `Created: ${new Date(run.createdAt).toLocaleString()}`,
     '',
+    ...(news
+      ? [
+          `## News Aggregation`,
+          `- Refreshed: ${new Date(news.refreshedAt).toLocaleString()}`,
+          `- Refresh count: ${news.refreshCount}`,
+          `- New items: ${news.newCount}`,
+          `- Updated items: ${news.updatedCount}`,
+          '',
+          ...news.items.slice(0, 10).map((item) => `- **${item.sourceName} #${item.rank}**: ${item.title} (${item.isNew ? 'new' : `seen ${item.seenCount}x`})`),
+          '',
+        ]
+      : []),
     `## Style Fingerprint`,
     `- Tone: ${profile.tone.join(', ')}`,
     `- Rhythm: ${profile.rhythm}`,
@@ -120,6 +141,17 @@ export function exportMarkdown(run: CampaignRun, profile: StyleProfile): string 
     `## Angles`,
     ...run.angles.map((angle) => `- **${angle.label}**: ${angle.headline}`),
     '',
+    ...(topicEvaluation
+      ? [
+          `## Topic Meeting`,
+          `- Overall: ${topicEvaluation.overall}`,
+          `- Verdict: ${topicEvaluation.verdict}`,
+          `- Recommendation: ${topicEvaluation.recommendation}`,
+          '',
+          ...topicEvaluation.dimensions.map((item) => `- **${item.label} ${item.score}**: ${item.rationale}`),
+          '',
+        ]
+      : []),
     `## X Thread Versions`,
     ...run.versions.flatMap((version) => [
       `### ${version.name}`,
