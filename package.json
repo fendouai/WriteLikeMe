@@ -12,6 +12,7 @@
     "electron:build": "npm run build && electron-builder --dir",
     "electron:pack": "npm run build && electron-builder",
     "test:desktop": "npm run build && node scripts/desktop-smoke.mjs",
+    "test:e2e": "npm run build && node scripts/news-to-final-e2e.mjs",
     "test:electron": "npm run test:desktop"
   },
   "build": {
@@ -58,6 +59,7 @@
     "cross-env": "^10.1.0",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
+    "playwright": "^1.61.1",
     "wait-on": "^9.0.10"
   }
 }
