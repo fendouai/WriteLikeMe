@@ -814,6 +814,10 @@ textarea:focus {
 
 .research-item span,
 .lead-card span,
+.objective-summary span,
+.goal-card span,
+.structure-card span,
+.section-draft-card span,
 .version-card span {
   display: block;
   color: #7c5b28;
@@ -858,22 +862,28 @@ textarea:focus {
 
 .angle-grid,
 .agent-list,
+.goal-grid,
+.structure-grid,
 .version-grid {
   display: grid;
   gap: 10px;
 }
 
 .angle-grid,
-.agent-list {
+.agent-list,
+.structure-grid {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.goal-grid,
 .version-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .angle-card,
 .agent-card,
+.goal-card,
+.structure-card,
 .version-card {
   min-height: 156px;
   padding: 14px;
@@ -884,7 +894,28 @@ textarea:focus {
   text-align: left;
 }
 
-.angle-card.selected {
+.objective-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.objective-summary > div {
+  padding: 14px;
+  border: 1px solid #d9d0bd;
+  border-radius: 8px;
+  background: #f7f1e5;
+}
+
+.objective-summary strong {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.angle-card.selected,
+.structure-card.selected {
   border-color: #1f1f1d;
   background: #e9ff9b;
 }
@@ -908,6 +939,120 @@ textarea:focus {
   display: block;
   margin-top: 10px;
   color: #5b574f;
+  line-height: 1.4;
+}
+
+.goal-card h3,
+.structure-card h3 {
+  margin: 10px 0 8px;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.goal-card p,
+.structure-card p {
+  margin: 0;
+  color: #5b574f;
+  line-height: 1.45;
+}
+
+.goal-card small {
+  display: block;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e4dccb;
+  color: #424331;
+  line-height: 1.4;
+}
+
+.section-plan {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.section-plan-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d0bd;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.section-plan-item > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #20201d;
+  color: #fffaf0;
+  font-weight: 900;
+}
+
+.section-plan-item strong,
+.section-plan-item p,
+.section-plan-item small {
+  display: block;
+}
+
+.section-plan-item p {
+  margin: 5px 0;
+  color: #5b574f;
+  line-height: 1.4;
+}
+
+.section-plan-item small {
+  color: #7c5b28;
+  line-height: 1.35;
+}
+
+.section-draft-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-draft-card {
+  padding: 16px;
+  border: 1px solid #d9d0bd;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.section-draft-card > div {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.section-draft-card strong {
+  line-height: 1.35;
+}
+
+.section-draft-card p {
+  margin-bottom: 12px;
+  color: #5b574f;
+  line-height: 1.45;
+}
+
+.section-draft-card pre {
+  margin: 0 0 12px;
+  padding: 14px;
+  border: 1px solid #e4dccb;
+  border-radius: 8px;
+  background: #f7f1e5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  line-height: 1.55;
+}
+
+.section-draft-card small {
+  color: #7c5b28;
+  font-weight: 700;
   line-height: 1.4;
 }
 
@@ -1114,7 +1259,9 @@ textarea:focus {
 @media (max-width: 1180px) {
   .angle-grid,
   .agent-list,
+  .goal-grid,
   .research-grid,
+  .structure-grid,
   .version-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1199,7 +1346,10 @@ textarea:focus {
 
   .angle-grid,
   .agent-list,
+  .goal-grid,
+  .objective-summary,
   .research-grid,
+  .structure-grid,
   .version-grid,
   .input-flow-grid,
   .settings-grid,

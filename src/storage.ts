@@ -138,6 +138,33 @@ export function exportMarkdown(run: CampaignRun, profile: StyleProfile, news?: N
     `## Signals`,
     ...run.signal.map((item) => `- ${item}`),
     '',
+    ...(run.writingObjective
+      ? [
+          `## Writing Objective`,
+          `- Framework: ${run.writingObjective.framework}`,
+          `- Summary: ${run.writingObjective.summary}`,
+          `- Current cognition: ${run.writingObjective.currentCognition}`,
+          `- Unique value: ${run.writingObjective.uniqueValue}`,
+          `- Cognitive gap: ${run.writingObjective.cognitionGap}`,
+          '',
+          ...run.writingObjective.dimensions.map((item) => [
+            `### ${item.label}`,
+            `- Target: ${item.target}`,
+            `- Reader gain: ${item.readerGain}`,
+            `- Success metric: ${item.successMetric}`,
+            '',
+          ]).flat(),
+        ]
+      : []),
+    ...(run.contentStructure
+      ? [
+          `## Content Structure`,
+          `- Selected template: ${run.contentStructure.templates.find((template) => template.id === run.contentStructure.selectedTemplateId)?.name || run.contentStructure.selectedTemplateId}`,
+          '',
+          ...run.contentStructure.sections.map((section) => `- **${section.title}**: ${section.job} Reader gain: ${section.readerGain}`),
+          '',
+        ]
+      : []),
     `## Angles`,
     ...run.angles.map((angle) => `- **${angle.label}**: ${angle.headline}`),
     '',
@@ -150,6 +177,20 @@ export function exportMarkdown(run: CampaignRun, profile: StyleProfile, news?: N
           '',
           ...topicEvaluation.dimensions.map((item) => `- **${item.label} ${item.score}**: ${item.rationale}`),
           '',
+        ]
+      : []),
+    ...(run.sectionDrafts
+      ? [
+          `## Section Drafts`,
+          ...run.sectionDrafts.flatMap((section) => [
+            `### ${section.title}`,
+            `- Objective: ${section.objective}`,
+            `- Reader gain: ${section.readerGain}`,
+            `- Evidence prompt: ${section.evidencePrompt}`,
+            '',
+            section.draft,
+            '',
+          ]),
         ]
       : []),
     `## X Thread Versions`,

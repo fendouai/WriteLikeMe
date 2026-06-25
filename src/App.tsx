@@ -57,6 +57,9 @@ const agents = [
   { name: 'User Research Agent', detail: '建立用户画像，并给出真实用户搜索线索。', icon: Users },
   { name: 'Knowledge Agent', detail: '把链接或文本扩展成写作知识库。', icon: BookOpen },
   { name: 'Demand Agent', detail: '判断读者已知、未知、卡点和内容需求。', icon: Target },
+  { name: 'Objective Architect', detail: '定义读者认知基础、文章独特价值和三维写作目标。', icon: Target },
+  { name: 'Structure Architect', detail: '从经典结构中选择最适合目标的文章结构。', icon: Layers3 },
+  { name: 'Section Writer', detail: '按结构完成每个部分的写作，并提示证据补充点。', icon: MessageSquareText },
   { name: 'Signal Agent', detail: '抓取输入中的产品、新闻、用户和传播价值。', icon: BrainCircuit },
   { name: 'Angle Agent', detail: '生成反常识、创业机会、趋势、工具和争议角度。', icon: Sparkles },
   { name: 'Style Fingerprint', detail: '从历史样本文案中提取语气、节奏和禁用表达。', icon: PenLine },
@@ -78,11 +81,11 @@ const workflowSteps = [
   { id: 'news', title: 'News', description: '聚合新闻并增量刷新' },
   { id: 'insight', title: 'Insight', description: '提取核心信息' },
   { id: 'research', title: 'Research', description: '确认用户和知识库' },
-  { id: 'angles', title: 'Angles', description: '选择选题角度' },
-  { id: 'meeting', title: 'Meeting', description: '选题会评分' },
+  { id: 'goal', title: 'Goal', description: '定义写作目标' },
+  { id: 'structure', title: 'Structure', description: '选择文章结构' },
+  { id: 'meeting', title: 'Meeting', description: '选题和结构评分' },
   { id: 'style', title: 'Voice', description: '确认作者风格' },
-  { id: 'draft', title: 'Draft', description: '查看三版 X thread' },
-  { id: 'assets', title: 'Assets', description: '适配多平台内容' },
+  { id: 'draft', title: 'Write', description: '逐段写作并适配平台' },
   { id: 'score', title: 'Review', description: '评分、优化、导出' },
 ] as const;
 
@@ -122,7 +125,8 @@ export function App() {
 
   const styleProfile = useMemo(() => analyzeStyle(styleSamples), [styleSamples]);
   const fallbackRun = useMemo(() => runCampaign(source, styleProfile, selectedAngleId), [source, styleProfile, selectedAngleId]);
-  const currentRun = runs[0]?.research && runs[0]?.versions ? runs[0] : fallbackRun;
+  const currentRun =
+    runs[0]?.research && runs[0]?.versions && runs[0]?.writingObjective && runs[0]?.contentStructure && runs[0]?.sectionDrafts ? runs[0] : fallbackRun;
   const selectedAngle = currentRun.angles.find((angle) => angle.id === currentRun.selectedAngleId) ?? currentRun.angles[0];
   const activeAsset = currentRun.assets[activePlatform] ?? currentRun.assets[0];
   const topicEvaluation = useMemo(() => evaluateTopic(selectedAngle, source, newsAggregation), [selectedAngle, source, newsAggregation]);
@@ -256,7 +260,7 @@ export function App() {
 
         <div className="sidebar-note">
           <span>Pipeline</span>
-          <strong>{'Signal -> Angle -> Voice -> Platforms -> Score -> Optimize'}</strong>
+          <strong>{'Signal -> Research -> Goal -> Structure -> Write -> Review'}</strong>
         </div>
       </aside>
 
@@ -488,7 +492,7 @@ export function App() {
                 title="确认用户、内容知识库和需求地图"
                 description="这里像研究瀑布的第一层：先判断给谁写、他们知道什么、还缺什么，以及下一步应该去哪里找真实用户证据。"
                 action={
-                  <button className="primary-button" onClick={() => setActiveStep('angles')}>
+                  <button className="primary-button" onClick={() => setActiveStep('goal')}>
                     Confirm research
                     <ArrowRight size={18} />
                   </button>
@@ -520,12 +524,52 @@ export function App() {
               </FlowCard>
             )}
 
-            {activeStep === 'angles' && (
+            {activeStep === 'goal' && (
               <FlowCard
-                icon={<Sparkles size={19} />}
+                icon={<Target size={19} />}
                 kicker="Step 5"
-                title="选择一个选题角度"
-                description="每个角度会触发一次重新生成。你可以点卡片切换，然后进入选题会评分。"
+                title="定义文章的读者价值目标"
+                description="写作目标不是主题，而是读者在原有认知上获得什么。这里使用 Reader Value Objective：知识判断、方法过程、态度决策。"
+                action={
+                  <button className="primary-button" onClick={() => setActiveStep('structure')}>
+                    Design structure
+                    <ArrowRight size={18} />
+                  </button>
+                }
+              >
+                <div className="objective-summary">
+                  <div>
+                    <span>Current cognition</span>
+                    <strong>{currentRun.writingObjective.currentCognition}</strong>
+                  </div>
+                  <div>
+                    <span>Unique value</span>
+                    <strong>{currentRun.writingObjective.uniqueValue}</strong>
+                  </div>
+                  <div className="span-2">
+                    <span>Cognitive gap</span>
+                    <strong>{currentRun.writingObjective.cognitionGap}</strong>
+                  </div>
+                </div>
+                <div className="goal-grid">
+                  {currentRun.writingObjective.dimensions.map((dimension) => (
+                    <article className="goal-card" key={dimension.label}>
+                      <span>{dimension.label}</span>
+                      <h3>{dimension.target}</h3>
+                      <p>{dimension.readerGain}</p>
+                      <small>{dimension.successMetric}</small>
+                    </article>
+                  ))}
+                </div>
+              </FlowCard>
+            )}
+
+            {activeStep === 'structure' && (
+              <FlowCard
+                icon={<Layers3 size={19} />}
+                kicker="Step 6"
+                title="选择适合目标的写作结构"
+                description="结构服务写作目标。工作台会准备几种经典结构，并选出最适合当前材料的一种，后续逐段写作会按它推进。"
                 action={
                   <button className="primary-button" onClick={() => setActiveStep('meeting')}>
                     Send to topic meeting
@@ -533,7 +577,47 @@ export function App() {
                   </button>
                 }
               >
-                <div className="angle-grid">
+                <div className="structure-grid">
+                  {currentRun.contentStructure.templates.map((template) => (
+                    <article
+                      className={`structure-card ${template.id === currentRun.contentStructure.selectedTemplateId ? 'selected' : ''}`}
+                      key={template.id}
+                    >
+                      <span>{template.bestFor}</span>
+                      <h3>{template.name}</h3>
+                      <p>{template.rationale}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="section-plan">
+                  {currentRun.contentStructure.sections.map((section, index) => (
+                    <div className="section-plan-item" key={section.title}>
+                      <span>{index + 1}</span>
+                      <div>
+                        <strong>{section.title}</strong>
+                        <p>{section.job}</p>
+                        <small>{section.readerGain}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </FlowCard>
+            )}
+
+            {activeStep === 'meeting' && (
+              <FlowCard
+                icon={<Target size={19} />}
+                kicker="Step 7"
+                title="选题会：判断选题和结构值不值得写"
+                description="先选择角度，再用 10 个百分制维度评估选题价值。通过后进入作者风格和正式写作。"
+                action={
+                  <button className="primary-button" onClick={() => setActiveStep('style')}>
+                    Approve topic and structure
+                    <ArrowRight size={18} />
+                  </button>
+                }
+              >
+                <div className="angle-grid flow-block">
                   {currentRun.angles.map((angle) => (
                     <button
                       className={`angle-card ${angle.id === selectedAngle.id ? 'selected' : ''}`}
@@ -546,22 +630,6 @@ export function App() {
                     </button>
                   ))}
                 </div>
-              </FlowCard>
-            )}
-
-            {activeStep === 'meeting' && (
-              <FlowCard
-                icon={<Target size={19} />}
-                kicker="Step 6"
-                title="选题会：判断这个选题值不值得写"
-                description="用 10 个百分制维度评估选题价值。通过后再进入作者风格和正式写作。"
-                action={
-                  <button className="primary-button" onClick={() => setActiveStep('style')}>
-                    Approve topic
-                    <ArrowRight size={18} />
-                  </button>
-                }
-              >
                 <div className="meeting-summary">
                   <div className="meeting-score">
                     <span>{topicEvaluation.overall}</span>
@@ -589,9 +657,9 @@ export function App() {
             {activeStep === 'style' && (
               <FlowCard
                 icon={<PenLine size={19} />}
-                kicker="Step 7"
+                kicker="Step 8"
                 title="确认 Write Like Me 风格指纹"
-                description="补充过往文本会影响后续版本。确认后，workflow 会把选定角度改写成三种 X thread。"
+                description="补充过往文本会影响后续版本。确认后，workflow 会按结构逐段写作，并生成平台资产。"
                 action={
                   <button className="primary-button" onClick={() => generateAndGo('draft', selectedAngle.id)}>
                     Apply voice
@@ -615,16 +683,29 @@ export function App() {
             {activeStep === 'draft' && (
               <FlowCard
                 icon={<MessageSquareText size={19} />}
-                kicker="Step 8"
-                title="查看三版 X thread"
-                description="A 稳妥专业，B 更有争议，C 更像本人。确认后进入多平台资产适配。"
+                kicker="Step 9"
+                title="按结构完成每一个部分的写作"
+                description="每一段都有 section job、reader gain 和 evidence prompt。下方同时生成三版 X thread 和多平台资产。"
                 action={
-                  <button className="primary-button" onClick={() => setActiveStep('assets')}>
-                    Adapt to platforms
+                  <button className="primary-button" onClick={() => setActiveStep('score')}>
+                    Review score
                     <ArrowRight size={18} />
                   </button>
                 }
               >
+                <div className="section-draft-list">
+                  {currentRun.sectionDrafts.map((section) => (
+                    <article className="section-draft-card" key={section.title}>
+                      <div>
+                        <span>{section.title}</span>
+                        <strong>{section.objective}</strong>
+                      </div>
+                      <p>{section.readerGain}</p>
+                      <pre>{section.draft}</pre>
+                      <small>{section.evidencePrompt}</small>
+                    </article>
+                  ))}
+                </div>
                 <div className="version-grid">
                   {currentRun.versions.map((version) => (
                     <article className="version-card" key={version.name}>
@@ -639,22 +720,6 @@ export function App() {
                     </article>
                   ))}
                 </div>
-              </FlowCard>
-            )}
-
-            {activeStep === 'assets' && (
-              <FlowCard
-                icon={<Layers3 size={19} />}
-                kicker="Step 9"
-                title="多平台内容资产"
-                description="切换平台查看不同结构。可以先优化当前平台稿件，再进入评分复盘。"
-                action={
-                  <button className="primary-button" onClick={() => setActiveStep('score')}>
-                    Review score
-                    <ArrowRight size={18} />
-                  </button>
-                }
-              >
                 <div className="tabs" role="tablist" aria-label="Generated platform assets">
                   {currentRun.assets.map((asset, index) => (
                     <button className={activePlatform === index ? 'active' : ''} key={asset.platform} onClick={() => setActivePlatform(index)}>

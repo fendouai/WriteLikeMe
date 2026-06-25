@@ -88,6 +88,50 @@ export type TopicEvaluation = {
   recommendation: string;
 };
 
+export type WritingGoalDimension = {
+  label: string;
+  target: string;
+  readerGain: string;
+  successMetric: string;
+};
+
+export type WritingObjective = {
+  framework: string;
+  summary: string;
+  currentCognition: string;
+  uniqueValue: string;
+  cognitionGap: string;
+  dimensions: WritingGoalDimension[];
+};
+
+export type StructureSection = {
+  title: string;
+  job: string;
+  readerGain: string;
+};
+
+export type StructureTemplate = {
+  id: string;
+  name: string;
+  bestFor: string;
+  rationale: string;
+  sections: StructureSection[];
+};
+
+export type ContentStructure = {
+  selectedTemplateId: string;
+  templates: StructureTemplate[];
+  sections: StructureSection[];
+};
+
+export type SectionDraft = {
+  title: string;
+  objective: string;
+  readerGain: string;
+  evidencePrompt: string;
+  draft: string;
+};
+
 export type PlatformAsset = {
   platform: Platform;
   title: string;
@@ -116,6 +160,9 @@ export type CampaignRun = {
   createdAt: string;
   research: ResearchDossier;
   signal: string[];
+  writingObjective: WritingObjective;
+  contentStructure: ContentStructure;
+  sectionDrafts: SectionDraft[];
   angles: Angle[];
   selectedAngleId: string;
   versions: ContentVersion[];
@@ -195,6 +242,9 @@ export function analyzeStyle(samples: string): StyleProfile {
 export function runCampaign(input: SourceInput, style: StyleProfile, selectedAngleId?: string): CampaignRun {
   const research = buildResearchDossier(input, style);
   const signal = extractSignal(input, research);
+  const writingObjective = buildWritingObjective(input, research, signal);
+  const contentStructure = buildContentStructure(input, writingObjective, signal);
+  const sectionDrafts = buildSectionDrafts(input, style, writingObjective, contentStructure, research, signal);
   const angles = buildAngles(input, signal, research);
   const selectedAngle = angles.find((angle) => angle.id === selectedAngleId) ?? angles[0];
   const versions = buildVersions(input, style, selectedAngle, signal, research);
@@ -207,6 +257,9 @@ export function runCampaign(input: SourceInput, style: StyleProfile, selectedAng
     createdAt: new Date().toISOString(),
     research,
     signal,
+    writingObjective,
+    contentStructure,
+    sectionDrafts,
     angles,
     selectedAngleId: selectedAngle.id,
     versions,
@@ -283,6 +336,193 @@ export function evaluateTopic(angle: Angle, input: SourceInput, news: NewsAggreg
           ? '建议先补 1-2 条真实用户证据，再进入写作。'
           : '建议回到新闻聚合或角度选择，寻找更强信号。',
   };
+}
+
+function buildWritingObjective(input: SourceInput, research: ResearchDossier, signal: string[]): WritingObjective {
+  const topic = input.title || research.knowledgeBase[0]?.detail || 'this source';
+  const currentCognition = research.userPersona[1]?.detail || 'The reader understands the surface information, but has not converted it into a useful decision.';
+  const uniqueValue = `把 ${topic} 从信息点推进成一个可判断、可执行、可复用的写作资产。`;
+  const cognitionGap = `读者已经知道“发生了什么”，但还缺少“为什么重要、如何判断、下一步怎么做”。`;
+
+  return {
+    framework: 'Reader Value Objective',
+    summary: `读完之后，读者应该能说明 ${topic} 的真正价值，并能用一套流程把类似信号转成内容决策。`,
+    currentCognition,
+    uniqueValue,
+    cognitionGap,
+    dimensions: [
+      {
+        label: 'Knowledge and Judgment',
+        target: `理解 ${signal[0] || topic} 背后的关键变化，而不是停留在复述新闻或功能。`,
+        readerGain: '获得一个更清晰的判断框架，知道这个话题为什么值得注意。',
+        successMetric: '读者能用一句话复述文章主判断，并区分它和普通摘要的差异。',
+      },
+      {
+        label: 'Method and Process',
+        target: '看到从信号、用户、需求、结构到成稿的完整路径。',
+        readerGain: '能把同类输入拆成研究、选题、结构、分段写作和平台适配。',
+        successMetric: '读者能照着流程完成自己的下一篇文章草案。',
+      },
+      {
+        label: 'Emotion, Attitude, Decision',
+        target: '让读者相信写作可以被工程化，同时仍然保留作者判断和个人声音。',
+        readerGain: '从“我需要灵感”转向“我可以按步骤推进”。',
+        successMetric: '读者愿意保存、评论、转发，或把其中一个步骤放进自己的内容工作流。',
+      },
+    ],
+  };
+}
+
+function buildContentStructure(input: SourceInput, objective: WritingObjective, signal: string[]): ContentStructure {
+  const topic = input.title || extractKeywords(input.sourceText, 1)[0] || 'this signal';
+  const templates = buildStructureTemplates(topic, objective, signal);
+  const selectedTemplate =
+    templates.find((template) => /workflow|pipeline|agent|jasper|执行|工作流/i.test(`${input.sourceText} ${input.productContext}`) && template.id === 'problem-system') ||
+    templates.find((template) => /news|trend|signal|趋势|新闻/i.test(`${input.sourceText} ${input.productContext}`) && template.id === 'signal-bet') ||
+    templates[0];
+
+  return {
+    selectedTemplateId: selectedTemplate.id,
+    templates,
+    sections: selectedTemplate.sections,
+  };
+}
+
+function buildStructureTemplates(topic: string, objective: WritingObjective, signal: string[]): StructureTemplate[] {
+  return [
+    {
+      id: 'problem-system',
+      name: 'Problem, Insight, System, Proof, Action',
+      bestFor: '产品分析、创始人观点、工作流类文章',
+      rationale: '先建立痛点，再给出独特判断，最后把判断落成可执行系统。',
+      sections: [
+        { title: 'Problem', job: '指出读者正在遇到但尚未准确命名的问题。', readerGain: '意识到问题不是单点工具，而是流程断裂。' },
+        { title: 'Insight', job: '给出文章的核心判断和认知增量。', readerGain: objective.dimensions[0]?.readerGain || '获得更清晰判断。' },
+        { title: 'System', job: '把判断拆成可复用的步骤。', readerGain: objective.dimensions[1]?.readerGain || '看到可执行路径。' },
+        { title: 'Proof', job: '补充新闻、案例、真实用户语言或产品细节。', readerGain: '相信这不是空泛观点。' },
+        { title: 'Action', job: '告诉读者读完之后可以做什么。', readerGain: objective.dimensions[2]?.readerGain || '形成行动意愿。' },
+      ],
+    },
+    {
+      id: 'before-after',
+      name: 'Before, Shift, After, Playbook',
+      bestFor: '解释市场变化、新范式、新工具迁移',
+      rationale: '用前后对比降低理解成本，再给出实践手册。',
+      sections: [
+        { title: 'Before', job: '描述旧方法和旧约束。', readerGain: '确认自己原有认知的边界。' },
+        { title: 'Shift', job: `解释 ${signal[0] || topic} 代表的变化。`, readerGain: '知道为什么现在需要换一种看法。' },
+        { title: 'After', job: '展示新方法下结果会如何不同。', readerGain: '看到新工作流带来的实际收益。' },
+        { title: 'Playbook', job: '给出可照做的步骤。', readerGain: '拿到具体操作路径。' },
+      ],
+    },
+    {
+      id: 'misconception',
+      name: 'Misconception, Reality, Mechanism, Implication',
+      bestFor: '反常识观点、争议话题、纠偏类文章',
+      rationale: '先拆掉常见误解，再解释机制和后果。',
+      sections: [
+        { title: 'Misconception', job: '提出一个常见但不完整的看法。', readerGain: '发现自己原来的判断可能太粗。' },
+        { title: 'Reality', job: '给出更准确的现实描述。', readerGain: '获得新的判断角度。' },
+        { title: 'Mechanism', job: '解释为什么现实会这样运作。', readerGain: '理解背后的因果链。' },
+        { title: 'Implication', job: '说明这对读者的选择意味着什么。', readerGain: '形成更好的决策标准。' },
+      ],
+    },
+    {
+      id: 'case-pattern',
+      name: 'Case, Pattern, Principle, Checklist',
+      bestFor: '教程、复盘、案例拆解、运营笔记',
+      rationale: '从具体案例进入，再抽象成原则和清单。',
+      sections: [
+        { title: 'Case', job: `用 ${topic} 建立具体场景。`, readerGain: '快速进入真实语境。' },
+        { title: 'Pattern', job: '抽出可重复出现的模式。', readerGain: '从单个案例看到通用规律。' },
+        { title: 'Principle', job: '总结可迁移原则。', readerGain: '知道下次如何判断。' },
+        { title: 'Checklist', job: '给出检查项。', readerGain: '可以直接用于自己的写作或产品。' },
+      ],
+    },
+    {
+      id: 'signal-bet',
+      name: 'Signal, Meaning, Bet, Execution',
+      bestFor: '新闻驱动、趋势判断、机会分析',
+      rationale: '先说信号，再说含义、下注和执行路径。',
+      sections: [
+        { title: 'Signal', job: '压缩新闻或来源里的关键信号。', readerGain: '知道发生了什么以及哪部分最重要。' },
+        { title: 'Meaning', job: '解释信号对用户、市场或创作者意味着什么。', readerGain: '理解它为什么和自己有关。' },
+        { title: 'Bet', job: '给出作者下注或趋势判断。', readerGain: '获得明确立场。' },
+        { title: 'Execution', job: '把判断落成行动步骤。', readerGain: '知道下一步怎么做。' },
+      ],
+    },
+  ];
+}
+
+function buildSectionDrafts(
+  input: SourceInput,
+  style: StyleProfile,
+  objective: WritingObjective,
+  structure: ContentStructure,
+  research: ResearchDossier,
+  signal: string[],
+): SectionDraft[] {
+  const topic = input.title || research.knowledgeBase[0]?.detail || '这个信号';
+  const voiceMove = style.signatureMoves[0] || '先给判断，再解释原因';
+  const proofLead = research.realUserLeads[0]?.query || '补一个真实用户搜索结果、案例或数据';
+
+  return structure.sections.map((section, index) => {
+    const evidencePrompt =
+      index === 0
+        ? `用一句真实用户抱怨或新闻细节证明问题存在：${proofLead}`
+        : index === structure.sections.length - 1
+          ? '补一个具体行动清单或下一步 CTA。'
+          : `补充一个来源、案例、截图、评论或数字，让 ${section.title} 更可信。`;
+
+    return {
+      title: section.title,
+      objective: section.job,
+      readerGain: section.readerGain,
+      evidencePrompt,
+      draft: draftSection(topic, section, objective, research, signal, voiceMove, index),
+    };
+  });
+}
+
+function draftSection(
+  topic: string,
+  section: StructureSection,
+  objective: WritingObjective,
+  research: ResearchDossier,
+  signal: string[],
+  voiceMove: string,
+  index: number,
+): string {
+  const audience = research.userPersona[0]?.detail || '目标读者';
+  const demand = research.demandMap[2]?.detail || '把信息转成可执行判断';
+  const opening = index === 0 ? `${topic} 真正值得写的地方，不是它本身很新，而是它暴露了一个更具体的问题。` : '';
+  const bodyByTitle: Record<string, string> = {
+    Problem: `对 ${audience} 来说，难点通常不是缺少信息，而是缺少一个能稳定推进的写作系统。${signal[2] || objective.cognitionGap}`,
+    Insight: `${voiceMove}：${objective.uniqueValue} 这篇文章要补上的认知，不是“又一个工具/新闻”，而是读者如何判断它和自己有什么关系。`,
+    System: `可以把过程拆成五步：捕捉信号，确认用户认知，定义写作目标，选择结构，按段落完成写作。每一步都产出一个可检查的中间件，而不是直接跳到成稿。`,
+    Proof: `证据应该来自真实用户语言、新闻聚合、产品细节或同类案例。现在最需要补的是：谁已经在为这个问题付出时间、钱或注意力。`,
+    Action: `读者读完后可以先做一件小事：拿一个链接，写下当前认知、独特价值和认知差距，再选一个结构模板完成第一版。`,
+    Before: `过去的做法更像从空白编辑器开始：先想标题，再逼自己写正文，最后才发现目标读者和结构都不够清楚。`,
+    Shift: `${signal[0] || topic} 的变化在于，写作正在从单次灵感变成可编排的流程。`,
+    After: `新的结果不是多一篇稿子，而是一组带着同一判断、不同平台形态的内容资产。`,
+    Playbook: `可执行流程是：先研究读者，再定义认知增量，接着选择结构，最后逐段写作和评分。`,
+    Misconception: `常见误解是：只要模型足够强，文章就会自然变好。`,
+    Reality: `现实是，模型能加速表达，但不能替你决定读者该获得什么。`,
+    Mechanism: `真正决定文章质量的是目标、结构、证据和声音之间是否互相支撑。`,
+    Implication: `所以要先把写作当成决策工程，再把 AI 当成执行助手。`,
+    Case: `以 ${topic} 为例，第一步不是改写，而是判断它为谁创造了新价值。`,
+    Pattern: `可复用模式是：信号越杂，越需要先建立认知目标和结构边界。`,
+    Principle: `原则是先确定读者增量，再选择表达路径。结构服务目标，素材服务结构。`,
+    Checklist: `检查清单：目标是否清楚，结构是否匹配，证据是否足够，段落是否各司其职，结尾是否推动行动。`,
+    Signal: `${signal[0] || topic} 这是文章的起点，但不是文章的全部。`,
+    Meaning: `它的意义在于：${demand}`,
+    Bet: `我的判断是，未来有价值的写作工具会更像一个小型编辑部，而不是一个更会续写的输入框。`,
+    Execution: `执行上，把每篇文章拆成目标、结构、段落、平台和评分，才能让产出稳定复用。`,
+  };
+
+  return [opening, bodyByTitle[section.title] || `${section.job} 这一节需要服务的读者收益是：${section.readerGain}`]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function optimizeAsset(asset: PlatformAsset, scores: ScoreCard): PlatformAsset {
