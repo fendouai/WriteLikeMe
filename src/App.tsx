@@ -77,8 +77,8 @@ const scoreLabels: Record<string, string> = {
 };
 
 const workflowSteps = [
-  { id: 'input', title: 'Start', description: '输入 URL 或文本' },
-  { id: 'news', title: 'News', description: '聚合新闻并增量刷新' },
+  { id: 'news', title: 'News', description: '浏览新闻池并选择素材' },
+  { id: 'input', title: 'Start', description: '确认 URL 或文本' },
   { id: 'insight', title: 'Insight', description: '提取核心信息' },
   { id: 'research', title: 'Research', description: '确认用户和知识库' },
   { id: 'goal', title: 'Goal', description: '定义写作目标' },
@@ -119,7 +119,7 @@ export function App() {
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>(() => loadRuntimeConfig());
   const [selectedAngleId, setSelectedAngleId] = useState<string | undefined>(runs[0]?.selectedAngleId);
   const [activePlatform, setActivePlatform] = useState(0);
-  const [activeStep, setActiveStep] = useState<WorkflowStepId>('input');
+  const [activeStep, setActiveStep] = useState<WorkflowStepId>('news');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -144,6 +144,20 @@ export function App() {
     const next = refreshNewsAggregation(source, newsAggregation);
     setNewsAggregation(next);
     saveNewsAggregation(next);
+  }
+
+  function selectNewsItem(item: NewsAggregation['items'][number]) {
+    const nextSource: SourceInput = {
+      ...source,
+      url: item.url,
+      title: item.title,
+      sourceText: `${item.title}\n\n${item.summary}\n\nSource: ${item.sourceName}. Rank: #${item.rank}. Relevance: ${item.relevance}.`,
+      productContext: source.productContext || 'Use the selected news signal as raw material, then turn it into an engineered article workflow.',
+    };
+    setSource(nextSource);
+    saveSource(nextSource);
+    setActiveStep('input');
+    window.setTimeout(() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
   function refreshCurrentStep() {
@@ -277,20 +291,20 @@ export function App() {
             </button>
             <button className="primary-button" onClick={() => setActiveStep('news')}>
               <Sparkles size={18} />
-              Start Flow
+              Browse News
             </button>
           </div>
         </header>
 
         <div className="hero-band flow-hero">
           <div className="signal-map" aria-hidden="true">
-            <div className="map-node large">Source</div>
+            <div className="map-node large">News</div>
             <div className="map-line" />
-            <div className="map-node">Agents</div>
+            <div className="map-node">Start</div>
             <div className="map-line" />
-            <div className="map-node">Assets</div>
+            <div className="map-node">Write</div>
             <div className="map-line" />
-            <div className="map-node accent">Scores</div>
+            <div className="map-node accent">Review</div>
           </div>
           <div className="hero-copy">
             <strong>Waterfall mode</strong>
@@ -376,12 +390,12 @@ export function App() {
             {activeStep === 'input' && (
               <FlowCard
                 icon={<BookOpen size={19} />}
-                kicker="Step 1"
-                title="从一个 URL 或一段文本开始"
-                description="你可以只填 URL 或 source notes。其他字段可以留空，后续 workflow 会给出推断结果。"
+                kicker="Step 2"
+                title="确认新闻素材，或手动输入 URL / 文本"
+                description="你可以从 News 点进来，也可以自己填 URL、标题、目标读者、产品上下文和 source notes。确认后进入信号提取。"
                 action={
-                  <button className="primary-button" onClick={() => setActiveStep('news')}>
-                    Aggregate news
+                  <button className="primary-button" onClick={() => generateAndGo('insight')}>
+                    Build insight
                     <ArrowRight size={18} />
                   </button>
                 }
@@ -414,12 +428,12 @@ export function App() {
             {activeStep === 'news' && (
               <FlowCard
                 icon={<Newspaper size={19} />}
-                kicker="Step 2"
-                title="新闻聚合和增量刷新"
-                description="参考 TrendRadar 的思路：多源热榜/RSS、URL+来源去重、记录首次出现、最后出现、刷新次数和新增数量。"
+                kicker="Step 1"
+                title="先浏览新闻池，再决定写什么"
+                description="参考 TrendRadar 的思路：多源热榜/RSS、URL+来源去重、记录首次出现、最后出现、刷新次数和新增数量。看到值得写的新闻，点击标题进入 Start。"
                 action={
-                  <button className="primary-button" onClick={() => setActiveStep('insight')}>
-                    Use news signals
+                  <button className="primary-button" onClick={() => setActiveStep('input')}>
+                    Use my own source
                     <ArrowRight size={18} />
                   </button>
                 }
@@ -449,7 +463,11 @@ export function App() {
                         <span>{item.sourceName}</span>
                         <strong>#{item.rank}</strong>
                       </div>
-                      <h3>{item.title}</h3>
+                      <h3>
+                        <button className="news-title-button" onClick={() => selectNewsItem(item)}>
+                          {item.title}
+                        </button>
+                      </h3>
                       <p>{item.summary}</p>
                       <div className="news-footer">
                         <small>{item.isNew ? 'New' : `Seen ${item.seenCount}x`}</small>

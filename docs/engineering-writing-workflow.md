@@ -1,6 +1,6 @@
 # Engineering Writing Workflow
 
-WriteLikeMe treats writing as a repeatable production system. The workspace starts from a URL or pasted text, turns it into research and decision context, defines what the reader should gain, selects a structure, then drafts each section before adapting the result to platforms.
+WriteLikeMe treats writing as a repeatable production system. The workspace starts from a news pool or a manual URL/text input, turns the selected material into research and decision context, defines what the reader should gain, selects a structure, then drafts each section before adapting the result to platforms.
 
 ## Core Principle
 
@@ -85,9 +85,9 @@ Each section should have:
 
 ## Full Workflow
 
-1. Start: capture URL, title, audience, source text, and product context.
-2. News: aggregate and incrementally refresh trend/news signals.
-3. Insight: compress input and news into core signals.
+1. News: aggregate and incrementally refresh trend/news signals. The writer can scan the pool and click a news title to use it as the source material.
+2. Start: confirm the selected news material, or manually enter URL, title, audience, source text, and product context.
+3. Insight: compress the selected material into core signals.
 4. Research: build user persona, knowledge base, demand map, and search leads.
 5. Goal: define the Reader Value Objective.
 6. Structure: select the best writing structure and section plan.
@@ -95,6 +95,118 @@ Each section should have:
 8. Voice: apply the author's style fingerprint.
 9. Write: draft every section, then generate X thread variants and platform assets.
 10. Review: score, optimize, export, and save the run.
+
+## Step Responsibilities
+
+### News
+
+The news pool is a discovery surface. It should feel like a working desk for scanning possible topics, not a required configuration step.
+
+Core interactions:
+
+- Incrementally refresh the aggregation.
+- Show source, rank, freshness, relevance, and summary.
+- Click a news title to enter Start with that item prefilled.
+- Allow the writer to skip the pool and use their own source.
+
+### Start
+
+Start is the source confirmation step. The writer can edit the selected news material or enter a different URL/text manually.
+
+Required output:
+
+- Working title.
+- Source URL or source note.
+- Audience.
+- Product or author context.
+
+### Insight
+
+Insight compresses the selected material into the few signals that matter. It should not draft yet.
+
+Required output:
+
+- Core topic.
+- First audience that should care.
+- Useful tension.
+- Growth or distribution angle.
+
+### Research
+
+Research turns the signal into context.
+
+Required output:
+
+- User persona.
+- Real user search leads.
+- Knowledge base.
+- Demand map.
+- Author profile.
+
+### Goal
+
+Goal defines what the article must help the reader obtain.
+
+Required output:
+
+- Current cognition.
+- Unique article value.
+- Cognitive gap.
+- Knowledge/judgment objective.
+- Method/process objective.
+- Emotion/attitude/decision objective.
+
+### Structure
+
+Structure selects the article architecture that best serves the goal.
+
+Required output:
+
+- Candidate classic structures.
+- Selected structure.
+- Section plan with section job and reader gain.
+
+### Meeting
+
+Meeting is the editorial gate.
+
+Required output:
+
+- Topic angle selection.
+- 10-dimension topic score.
+- Go/no-go recommendation.
+
+### Voice
+
+Voice applies the author's style fingerprint.
+
+Required output:
+
+- Tone.
+- Rhythm.
+- Vocabulary.
+- Forbidden phrases.
+
+### Write
+
+Write produces the actual article material.
+
+Required output:
+
+- Section-by-section drafts.
+- Evidence prompt for each section.
+- X thread variants.
+- Platform assets.
+
+### Review
+
+Review is the final quality gate.
+
+Required output:
+
+- Scores.
+- Optimization notes.
+- Exportable dossier.
 
 ## Engineering Notes
 
