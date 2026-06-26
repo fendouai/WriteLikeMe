@@ -22,7 +22,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   analyzeStyle,
   evaluateTopic,
@@ -122,6 +122,10 @@ export function App() {
   const [activeStep, setActiveStep] = useState<WorkflowStepId>('news');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState<{ encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> }>();
+  const [usage, setUsage] = useState<{ calls?: number; inputTokens?: number; outputTokens?: number; estimatedCostUsd?: number; monthlyBudgetUsd?: number }>();
+  const [serviceLogs, setServiceLogs] = useState<unknown[]>([]);
+  const [serviceNotice, setServiceNotice] = useState('');
 
   const styleProfile = useMemo(() => analyzeStyle(styleSamples), [styleSamples]);
   const fallbackRun = useMemo(() => runCampaign(source, styleProfile, selectedAngleId), [source, styleProfile, selectedAngleId]);
@@ -133,6 +137,28 @@ export function App() {
   const llmKeyCount = Object.values(runtimeConfig.llmKeys).filter(Boolean).length;
   const searchKeyCount = Object.values(runtimeConfig.searchKeys).filter(Boolean).length;
   const desktopInfo = typeof window !== 'undefined' ? window.writeLikeMeDesktop : undefined;
+  const secureLlmKeyCount = serviceStatus ? Object.values(serviceStatus.llm).filter(Boolean).length : llmKeyCount;
+  const secureSearchKeyCount = serviceStatus ? Object.values(serviceStatus.search).filter(Boolean).length : searchKeyCount;
+
+  useEffect(() => {
+    refreshServiceStatus();
+  }, []);
+
+  async function refreshServiceStatus() {
+    if (!desktopInfo?.api) return;
+    try {
+      const [nextStatus, nextUsage, nextLogs] = await Promise.all([
+        desktopInfo.api.getSecretStatus(),
+        desktopInfo.api.getUsage(),
+        desktopInfo.api.getLogs({ limit: 8 }),
+      ]);
+      setServiceStatus(nextStatus);
+      setUsage(nextUsage as typeof usage);
+      setServiceLogs(nextLogs);
+    } catch (error) {
+      setServiceNotice(`Service status unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   function updateSource(key: keyof SourceInput, value: string) {
     const next = { ...source, [key]: value };
@@ -140,10 +166,20 @@ export function App() {
     saveSource(next);
   }
 
-  function refreshNews() {
-    const next = refreshNewsAggregation(source, newsAggregation);
+  async function refreshNews() {
+    let next: NewsAggregation;
+    try {
+      next = desktopInfo?.api
+        ? ((await desktopInfo.api.refreshNews({ input: source, previous: newsAggregation })) as NewsAggregation)
+        : refreshNewsAggregation(source, newsAggregation);
+      setServiceNotice(desktopInfo?.api ? 'Real news aggregation refreshed.' : 'Browser fallback news refreshed.');
+    } catch (error) {
+      next = refreshNewsAggregation(source, newsAggregation);
+      setServiceNotice(`Real news failed, local fallback used: ${error instanceof Error ? error.message : String(error)}`);
+    }
     setNewsAggregation(next);
     saveNewsAggregation(next);
+    await refreshServiceStatus();
   }
 
   function selectNewsItem(item: NewsAggregation['items'][number]) {
@@ -160,12 +196,12 @@ export function App() {
     window.setTimeout(() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
-  function refreshCurrentStep() {
+  async function refreshCurrentStep() {
     if (activeStep === 'news') {
-      refreshNews();
+      await refreshNews();
       return;
     }
-    generateAndGo(activeStep);
+    await generateAndGo(activeStep);
   }
 
   function updateStyleSamples(value: string) {
@@ -179,32 +215,73 @@ export function App() {
     saveRuntimeConfig(next);
   }
 
-  function updateLlmKey(provider: LlmProviderKey, value: string) {
-    updateRuntimeConfig('llmKeys', { ...runtimeConfig.llmKeys, [provider]: value });
+  async function updateLlmKey(provider: LlmProviderKey, value: string) {
+    setRuntimeConfig({ ...runtimeConfig, llmKeys: { ...runtimeConfig.llmKeys, [provider]: value } });
+    if (desktopInfo?.api) {
+      const nextStatus = await desktopInfo.api.saveSecret({ kind: 'llm', provider, value });
+      setServiceStatus(nextStatus);
+      setServiceNotice(`${provider} LLM key saved to secure desktop storage.`);
+      await refreshServiceStatus();
+    } else {
+      updateRuntimeConfig('llmKeys', { ...runtimeConfig.llmKeys, [provider]: value });
+    }
   }
 
-  function updateSearchKey(provider: SearchProviderKey, value: string) {
-    updateRuntimeConfig('searchKeys', { ...runtimeConfig.searchKeys, [provider]: value });
+  async function updateSearchKey(provider: SearchProviderKey, value: string) {
+    setRuntimeConfig({ ...runtimeConfig, searchKeys: { ...runtimeConfig.searchKeys, [provider]: value } });
+    if (desktopInfo?.api) {
+      const nextStatus = await desktopInfo.api.saveSecret({ kind: 'search', provider, value });
+      setServiceStatus(nextStatus);
+      setServiceNotice(`${provider} Search key saved to secure desktop storage.`);
+      await refreshServiceStatus();
+    } else {
+      updateRuntimeConfig('searchKeys', { ...runtimeConfig.searchKeys, [provider]: value });
+    }
   }
 
-  function generate(angleId = selectedAngleId) {
-    const nextRun = runCampaign(source, styleProfile, angleId);
+  async function generate(angleId = selectedAngleId) {
+    let nextRun = runCampaign(source, styleProfile, angleId);
+    if (desktopInfo?.api) {
+      try {
+        const enhancement = (await desktopInfo.api.enhanceCampaign({ input: source, style: styleProfile, selectedAngleId: angleId })) as {
+          signal?: string[];
+          sectionDrafts?: CampaignRun['sectionDrafts'];
+          optimizationNotes?: string[];
+          providerMeta?: { llm?: string; model?: string; usage?: { estimatedCostUsd?: number } };
+        };
+        nextRun = {
+          ...nextRun,
+          signal: enhancement.signal?.length ? enhancement.signal.slice(0, 4) : nextRun.signal,
+          sectionDrafts: enhancement.sectionDrafts?.length ? enhancement.sectionDrafts : nextRun.sectionDrafts,
+          optimizationNotes: [
+            enhancement.providerMeta?.llm
+              ? `Generated with ${enhancement.providerMeta.llm}${enhancement.providerMeta.model ? ` / ${enhancement.providerMeta.model}` : ''}. Estimated cost $${(enhancement.providerMeta.usage?.estimatedCostUsd || 0).toFixed(6)}.`
+              : 'Generated with local fallback.',
+            ...(enhancement.optimizationNotes?.length ? enhancement.optimizationNotes : nextRun.optimizationNotes),
+          ],
+        };
+        setServiceNotice('LLM/Search enhancement completed in desktop service.');
+      } catch (error) {
+        setServiceNotice(`LLM/Search enhancement failed, local fallback used: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const nextRuns = [nextRun, ...runs].slice(0, 8);
     setRuns(nextRuns);
     setSelectedAngleId(nextRun.selectedAngleId);
     setActivePlatform(0);
     saveRuns(nextRuns);
+    await refreshServiceStatus();
   }
 
-  function generateAndGo(nextStep: WorkflowStepId, angleId = selectedAngleId) {
-    generate(angleId);
+  async function generateAndGo(nextStep: WorkflowStepId, angleId = selectedAngleId) {
+    await generate(angleId);
     setActiveStep(nextStep);
     window.setTimeout(() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
-  function selectAngle(angle: Angle) {
+  async function selectAngle(angle: Angle) {
     setSelectedAngleId(angle.id);
-    generate(angle.id);
+    await generate(angle.id);
   }
 
   function optimizeCurrentAsset() {
@@ -318,14 +395,23 @@ export function App() {
               <Settings2 size={18} />
               <h2>Settings</h2>
             </div>
-            <p className="settings-note">配置是全局项，不占用写作流程。这里只需要填各平台 API key，后续接入真实联网检索和模型生成时直接读取。</p>
+            <p className="settings-note">配置是全局项，不占用写作流程。桌面版会把 API key 保存到 Electron 主进程安全存储，并通过主进程执行真实联网检索和模型生成。</p>
             <div className="config-banner">
-              <strong>{llmKeyCount || searchKeyCount ? 'API keys configured' : 'Local rules only'}</strong>
+              <strong>{secureLlmKeyCount || secureSearchKeyCount ? 'Production services configured' : 'Local rules only'}</strong>
               <span>
-                {llmKeyCount || searchKeyCount
-                  ? `${llmKeyCount} 个 LLM key，${searchKeyCount} 个 Search key 已保存到本地浏览器。`
-                  : '当前不会调用外部模型或搜索。Research Dossier 是本地推断，Real User Leads 是建议搜索 query。'}
+                {desktopInfo?.api
+                  ? `${secureLlmKeyCount} 个 LLM key，${secureSearchKeyCount} 个 Search key。安全存储：${serviceStatus?.encryptionAvailable ? '可用' : '不可用，使用系统降级存储'}。`
+                  : secureLlmKeyCount || secureSearchKeyCount
+                    ? `${secureLlmKeyCount} 个 LLM key，${secureSearchKeyCount} 个 Search key 已保存到浏览器。`
+                    : '未配置 key 时使用本地规则降级；配置 key 后，桌面版会优先调用真实 Search / LLM 服务。'}
               </span>
+            </div>
+            {serviceNotice && <p className="service-notice">{serviceNotice}</p>}
+            <div className="ops-grid">
+              <Metric label="Service mode" value={desktopInfo?.api ? 'Electron main process' : 'Browser fallback'} />
+              <Metric label="Calls" value={`${usage?.calls || 0}`} />
+              <Metric label="Tokens" value={`${usage?.inputTokens || 0} in / ${usage?.outputTokens || 0} out`} />
+              <Metric label="Estimated cost" value={`$${(usage?.estimatedCostUsd || 0).toFixed(6)} / $${usage?.monthlyBudgetUsd || 10}`} />
             </div>
             <div className="provider-section">
               <div className="provider-heading">
@@ -339,7 +425,7 @@ export function App() {
                     <small>{provider.hint}</small>
                     <input
                       type="password"
-                      placeholder={`${provider.name} API key`}
+                      placeholder={serviceStatus?.llm[provider.key] ? 'Saved securely' : `${provider.name} API key`}
                       value={runtimeConfig.llmKeys[provider.key]}
                       onChange={(event) => updateLlmKey(provider.key, event.target.value)}
                     />
@@ -359,7 +445,7 @@ export function App() {
                     <small>{provider.hint}</small>
                     <input
                       type="password"
-                      placeholder={`${provider.name} API key`}
+                      placeholder={serviceStatus?.search[provider.key] ? 'Saved securely' : `${provider.name} API key`}
                       value={runtimeConfig.searchKeys[provider.key]}
                       onChange={(event) => updateSearchKey(provider.key, event.target.value)}
                     />
@@ -367,6 +453,19 @@ export function App() {
                 ))}
               </div>
             </div>
+            {serviceLogs.length > 0 && (
+              <div className="provider-section">
+                <div className="provider-heading">
+                  <h3>Production logs</h3>
+                  <span>最近的调用、重试、失败和降级记录。</span>
+                </div>
+                <div className="service-log-list">
+                  {serviceLogs.map((item, index) => (
+                    <pre key={index}>{JSON.stringify(item, null, 2)}</pre>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
 

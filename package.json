@@ -13,6 +13,7 @@
     "electron:pack": "npm run build && electron-builder",
     "test:desktop": "npm run build && node scripts/desktop-smoke.mjs",
     "test:e2e": "npm run build && node scripts/news-to-final-e2e.mjs",
+    "test:services": "npm run build && cross-env ELECTRON_SERVICE_TEST=1 electron .",
     "test:electron": "npm run test:desktop"
   },
   "build": {

@@ -455,6 +455,42 @@ h1 {
   line-height: 1.45;
 }
 
+.service-notice {
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #d9d0bd;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #4d473d;
+  line-height: 1.4;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.service-log-list {
+  display: grid;
+  gap: 8px;
+}
+
+.service-log-list pre {
+  max-height: 150px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #e4dccb;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #38342d;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 .config-banner {
   display: flex;
   gap: 12px;
@@ -1365,6 +1401,7 @@ textarea:focus {
   .agent-list,
   .goal-grid,
   .objective-summary,
+  .ops-grid,
   .research-grid,
   .structure-grid,
   .version-grid,
