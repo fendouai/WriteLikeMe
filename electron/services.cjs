@@ -34,6 +34,11 @@ const rssSources = [
 
 const monthlyBudgetUsd = Number(process.env.WLM_MONTHLY_BUDGET_USD || 10);
 
+function providerUrl(kind, provider, fallback) {
+  const key = `WLM_${kind.toUpperCase()}_${provider.toUpperCase()}_URL`;
+  return process.env[key] || fallback;
+}
+
 function userDataPath(...parts) {
   const dir = join(app.getPath('userData'), 'production-services');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -277,21 +282,22 @@ async function searchWeb(query, preferredProvider) {
   const key = selected.key;
   const config = searchProviders[provider];
   return withRetry({ type: 'search.query', provider }, {}, async () => {
+    const url = providerUrl('search', provider, config.url);
     let response;
     if (provider === 'tavily') {
-      response = await fetchWithTimeout(config.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ api_key: key, query, max_results: 5 }) });
+      response = await fetchWithTimeout(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ api_key: key, query, max_results: 5 }) });
     } else if (provider === 'serper') {
-      response = await fetchWithTimeout(config.url, { method: 'POST', headers: { 'content-type': 'application/json', 'X-API-KEY': key }, body: JSON.stringify({ q: query, num: 5 }) });
+      response = await fetchWithTimeout(url, { method: 'POST', headers: { 'content-type': 'application/json', 'X-API-KEY': key }, body: JSON.stringify({ q: query, num: 5 }) });
     } else if (provider === 'brave') {
-      response = await fetchWithTimeout(`${config.url}?q=${encodeURIComponent(query)}&count=5`, { headers: { 'X-Subscription-Token': key, accept: 'application/json' } });
+      response = await fetchWithTimeout(`${url}?q=${encodeURIComponent(query)}&count=5`, { headers: { 'X-Subscription-Token': key, accept: 'application/json' } });
     } else if (provider === 'exa') {
-      response = await fetchWithTimeout(config.url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key }, body: JSON.stringify({ query, numResults: 5 }) });
+      response = await fetchWithTimeout(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key }, body: JSON.stringify({ query, numResults: 5 }) });
     } else if (provider === 'bing') {
-      response = await fetchWithTimeout(`${config.url}?q=${encodeURIComponent(query)}&count=5`, { headers: { 'Ocp-Apim-Subscription-Key': key } });
+      response = await fetchWithTimeout(`${url}?q=${encodeURIComponent(query)}&count=5`, { headers: { 'Ocp-Apim-Subscription-Key': key } });
     } else {
       const [apiKey, cx] = key.split(':');
       if (!apiKey || !cx) throw new Error('Google CSE key must be API_KEY:CX');
-      response = await fetchWithTimeout(`${config.url}?key=${encodeURIComponent(apiKey)}&cx=${encodeURIComponent(cx)}&q=${encodeURIComponent(query)}&num=5`);
+      response = await fetchWithTimeout(`${url}?key=${encodeURIComponent(apiKey)}&cx=${encodeURIComponent(cx)}&q=${encodeURIComponent(query)}&num=5`);
     }
     if (!response.ok) throw new Error(`${config.name} returned HTTP ${response.status}`);
     const data = await response.json();
@@ -328,21 +334,22 @@ async function callLlm(prompt, preferredProvider) {
   const config = llmProviders[provider];
   assertBudgetAvailable(provider);
   return withRetry({ type: 'llm.generate', provider, model: config.model }, {}, async () => {
+    const url = providerUrl('llm', provider, config.url);
     let response;
     if (config.type === 'anthropic') {
-      response = await fetchWithTimeout(config.url, {
+      response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({ model: config.model, max_tokens: 1800, messages: [{ role: 'user', content: prompt }] }),
       });
     } else if (config.type === 'gemini') {
-      response = await fetchWithTimeout(`${config.url}?key=${encodeURIComponent(key)}`, {
+      response = await fetchWithTimeout(`${url}?key=${encodeURIComponent(key)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       });
     } else {
-      response = await fetchWithTimeout(config.url, {
+      response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
         body: JSON.stringify({ model: config.model, temperature: 0.4, messages: [{ role: 'user', content: prompt }] }),
