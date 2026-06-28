@@ -12,7 +12,9 @@
     "electron:build": "npm run build && electron-builder --dir",
     "electron:pack": "npm run build && electron-builder",
     "test:desktop": "npm run build && node scripts/desktop-smoke.mjs",
+    "test:unit": "vitest run",
     "test:e2e": "npm run build && node scripts/news-to-final-e2e.mjs",
+    "test:flow": "npm run build && node scripts/business-flow-e2e.mjs",
     "test:services": "npm run build && cross-env ELECTRON_SERVICE_TEST=1 electron .",
     "test:electron": "npm run test:desktop"
   },
@@ -56,11 +58,14 @@
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vitest/ui": "^2.1.9",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
+    "jsdom": "^25.0.1",
     "playwright": "^1.61.1",
+    "vitest": "^2.1.9",
     "wait-on": "^9.0.10"
   },
   "overrides": {

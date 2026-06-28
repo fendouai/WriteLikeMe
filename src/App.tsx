@@ -27,14 +27,17 @@ import {
   analyzeStyle,
   evaluateTopic,
   optimizeAsset,
+  optimizeLoop,
   refreshNewsAggregation,
   runCampaign,
   type Angle,
   type CampaignRun,
   type NewsAggregation,
+  type OptimizationTrajectory,
   type PlatformAsset,
   type SourceInput,
 } from './agentEngine';
+import { createBrowserService } from './browserServices';
 import {
   exportMarkdown,
   loadNewsAggregation,
@@ -78,7 +81,7 @@ const scoreLabels: Record<string, string> = {
 
 const workflowSteps = [
   { id: 'news', title: 'News', description: '浏览新闻池并选择素材' },
-  { id: 'input', title: 'Start', description: '确认 URL 或文本' },
+  { id: 'input', title: 'Topic', description: '确认 URL 或文本' },
   { id: 'insight', title: 'Insight', description: '提取核心信息' },
   { id: 'research', title: 'Research', description: '确认用户和知识库' },
   { id: 'goal', title: 'Goal', description: '定义写作目标' },
@@ -112,6 +115,9 @@ const searchProviders: { key: SearchProviderKey; name: string; hint: string }[] 
 ];
 
 export function App() {
+  // Created once; reused across renders. Only built when running in a browser
+  // (not the Electron renderer), where it supplies RSS/Search/LLM via direct fetch.
+  const browserService = useMemo(() => (typeof window !== 'undefined' && !window.writeLikeMeDesktop?.api ? createBrowserService() : undefined), []);
   const [source, setSource] = useState<SourceInput>(() => loadSource());
   const [newsAggregation, setNewsAggregation] = useState<NewsAggregation>(() => loadNewsAggregation() ?? refreshNewsAggregation(loadSource()));
   const [styleSamples, setStyleSamples] = useState(() => loadStyleSamples());
@@ -122,6 +128,10 @@ export function App() {
   const [activeStep, setActiveStep] = useState<WorkflowStepId>('news');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoRunStep, setAutoRunStep] = useState('');
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizationTrajectory, setOptimizationTrajectory] = useState<OptimizationTrajectory | undefined>(undefined);
   const [serviceStatus, setServiceStatus] = useState<{ encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> }>();
   const [usage, setUsage] = useState<{ calls?: number; inputTokens?: number; outputTokens?: number; estimatedCostUsd?: number; monthlyBudgetUsd?: number }>();
   const [serviceLogs, setServiceLogs] = useState<unknown[]>([]);
@@ -137,22 +147,31 @@ export function App() {
   const llmKeyCount = Object.values(runtimeConfig.llmKeys).filter(Boolean).length;
   const searchKeyCount = Object.values(runtimeConfig.searchKeys).filter(Boolean).length;
   const desktopInfo = typeof window !== 'undefined' ? window.writeLikeMeDesktop : undefined;
+  // Unified service surface: prefer the Electron main-process bridge; otherwise the
+  // browser adapter gives the same RSS/Search/LLM capabilities via direct fetch.
+  const serviceApi = desktopInfo?.api ?? (typeof window !== 'undefined' ? browserService : undefined);
+  const isDesktopMode = Boolean(desktopInfo?.api);
   const secureLlmKeyCount = serviceStatus ? Object.values(serviceStatus.llm).filter(Boolean).length : llmKeyCount;
   const secureSearchKeyCount = serviceStatus ? Object.values(serviceStatus.search).filter(Boolean).length : searchKeyCount;
 
   useEffect(() => {
     refreshServiceStatus();
+    // Replace the local placeholder news with a real RSS aggregation on startup,
+    // so cards show real source URLs instead of example.com placeholder data.
+    if (serviceApi) {
+      refreshNews();
+    }
   }, []);
 
   async function refreshServiceStatus() {
-    if (!desktopInfo?.api) return;
+    if (!serviceApi) return;
     try {
       const [nextStatus, nextUsage, nextLogs] = await Promise.all([
-        desktopInfo.api.getSecretStatus(),
-        desktopInfo.api.getUsage(),
-        desktopInfo.api.getLogs({ limit: 8 }),
+        serviceApi.getSecretStatus(),
+        serviceApi.getUsage(),
+        serviceApi.getLogs({ limit: 8 }),
       ]);
-      setServiceStatus(nextStatus);
+      setServiceStatus(nextStatus as { encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> });
       setUsage(nextUsage as typeof usage);
       setServiceLogs(nextLogs);
     } catch (error) {
@@ -169,10 +188,10 @@ export function App() {
   async function refreshNews() {
     let next: NewsAggregation;
     try {
-      next = desktopInfo?.api
-        ? ((await desktopInfo.api.refreshNews({ input: source, previous: newsAggregation })) as NewsAggregation)
+      next = serviceApi
+        ? ((await serviceApi.refreshNews({ input: source, previous: newsAggregation })) as NewsAggregation)
         : refreshNewsAggregation(source, newsAggregation);
-      setServiceNotice(desktopInfo?.api ? 'Real news aggregation refreshed.' : 'Browser fallback news refreshed.');
+      setServiceNotice(serviceApi ? 'Real news aggregation refreshed.' : 'Local rules news refreshed.');
     } catch (error) {
       next = refreshNewsAggregation(source, newsAggregation);
       setServiceNotice(`Real news failed, local fallback used: ${error instanceof Error ? error.message : String(error)}`);
@@ -183,12 +202,22 @@ export function App() {
   }
 
   function selectNewsItem(item: NewsAggregation['items'][number]) {
+    const sourceNotes = [
+      `Title: ${item.title}`,
+      `Summary: ${item.summary}`,
+      `Source: ${item.sourceName} (${item.sourceType})`,
+      `Rank: #${item.rank}`,
+      `Relevance: ${item.relevance}`,
+      item.isNew ? `Status: new` : `Status: seen ${item.seenCount}x`,
+      `First seen: ${new Date(item.firstSeenAt).toLocaleString()}`,
+      `Last seen: ${new Date(item.lastSeenAt).toLocaleString()}`,
+    ].join('\n');
     const nextSource: SourceInput = {
-      ...source,
       url: item.url,
       title: item.title,
-      sourceText: `${item.title}\n\n${item.summary}\n\nSource: ${item.sourceName}. Rank: #${item.rank}. Relevance: ${item.relevance}.`,
-      productContext: source.productContext || 'Use the selected news signal as raw material, then turn it into an engineered article workflow.',
+      sourceText: sourceNotes,
+      audience: '',
+      productContext: '',
     };
     setSource(nextSource);
     saveSource(nextSource);
@@ -216,67 +245,155 @@ export function App() {
   }
 
   async function updateLlmKey(provider: LlmProviderKey, value: string) {
-    setRuntimeConfig({ ...runtimeConfig, llmKeys: { ...runtimeConfig.llmKeys, [provider]: value } });
-    if (desktopInfo?.api) {
-      const nextStatus = await desktopInfo.api.saveSecret({ kind: 'llm', provider, value });
+    const nextKeys = { ...runtimeConfig.llmKeys, [provider]: value };
+    setRuntimeConfig({ ...runtimeConfig, llmKeys: nextKeys });
+    saveRuntimeConfig({ ...runtimeConfig, llmKeys: nextKeys });
+    if (serviceApi) {
+      const nextStatus = (await serviceApi.saveSecret({ kind: 'llm', provider, value })) as { encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> };
       setServiceStatus(nextStatus);
-      setServiceNotice(`${provider} LLM key saved to secure desktop storage.`);
+      setServiceNotice(`${provider} LLM key saved ${isDesktopMode ? 'to secure desktop storage' : 'to browser storage'}.`);
       await refreshServiceStatus();
-    } else {
-      updateRuntimeConfig('llmKeys', { ...runtimeConfig.llmKeys, [provider]: value });
     }
   }
 
   async function updateSearchKey(provider: SearchProviderKey, value: string) {
-    setRuntimeConfig({ ...runtimeConfig, searchKeys: { ...runtimeConfig.searchKeys, [provider]: value } });
-    if (desktopInfo?.api) {
-      const nextStatus = await desktopInfo.api.saveSecret({ kind: 'search', provider, value });
+    const nextKeys = { ...runtimeConfig.searchKeys, [provider]: value };
+    setRuntimeConfig({ ...runtimeConfig, searchKeys: nextKeys });
+    saveRuntimeConfig({ ...runtimeConfig, searchKeys: nextKeys });
+    if (serviceApi) {
+      const nextStatus = (await serviceApi.saveSecret({ kind: 'search', provider, value })) as { encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> };
       setServiceStatus(nextStatus);
-      setServiceNotice(`${provider} Search key saved to secure desktop storage.`);
+      setServiceNotice(`${provider} Search key saved ${isDesktopMode ? 'to secure desktop storage' : 'to browser storage'}.`);
       await refreshServiceStatus();
-    } else {
-      updateRuntimeConfig('searchKeys', { ...runtimeConfig.searchKeys, [provider]: value });
     }
   }
 
   async function generate(angleId = selectedAngleId) {
-    let nextRun = runCampaign(source, styleProfile, angleId);
-    if (desktopInfo?.api) {
-      try {
-        const enhancement = (await desktopInfo.api.enhanceCampaign({ input: source, style: styleProfile, selectedAngleId: angleId })) as {
-          signal?: string[];
-          sectionDrafts?: CampaignRun['sectionDrafts'];
-          optimizationNotes?: string[];
-          providerMeta?: { llm?: string; model?: string; usage?: { estimatedCostUsd?: number } };
-        };
-        nextRun = {
-          ...nextRun,
-          signal: enhancement.signal?.length ? enhancement.signal.slice(0, 4) : nextRun.signal,
-          sectionDrafts: enhancement.sectionDrafts?.length ? enhancement.sectionDrafts : nextRun.sectionDrafts,
-          optimizationNotes: [
-            enhancement.providerMeta?.llm
-              ? `Generated with ${enhancement.providerMeta.llm}${enhancement.providerMeta.model ? ` / ${enhancement.providerMeta.model}` : ''}. Estimated cost $${(enhancement.providerMeta.usage?.estimatedCostUsd || 0).toFixed(6)}.`
-              : 'Generated with local fallback.',
-            ...(enhancement.optimizationNotes?.length ? enhancement.optimizationNotes : nextRun.optimizationNotes),
-          ],
-        };
-        setServiceNotice('LLM/Search enhancement completed in desktop service.');
-      } catch (error) {
-        setServiceNotice(`LLM/Search enhancement failed, local fallback used: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // 1. Compute locally and render IMMEDIATELY so the UI never blocks on the network.
+    const nextRun = runCampaign(source, styleProfile, angleId);
     const nextRuns = [nextRun, ...runs].slice(0, 8);
     setRuns(nextRuns);
     setSelectedAngleId(nextRun.selectedAngleId);
     setActivePlatform(0);
     saveRuns(nextRuns);
-    await refreshServiceStatus();
+    setServiceNotice('');
+
+    // 2. Kick off LLM/Search enhancement in the background. When it resolves it
+    //    silently upgrades the run; if it fails we keep the local result. Either way
+    //    the user already has a responsive result in front of them.
+    void enhanceInBackground(nextRun, angleId, nextRuns);
+
+    // 3. Refresh service status without awaiting the network-bound enhancement.
+    void refreshServiceStatus();
+    return nextRun;
+  }
+
+  // Background enhancement: takes a locally-computed run, asks the LLM/Search service
+  // for a richer version, and patches the top run in place when it arrives. Failures are
+  // surfaced as a non-blocking notice; the local run is always retained.
+  async function enhanceInBackground(baseRun: CampaignRun, angleId: string | undefined, baseRuns: CampaignRun[]) {
+    if (!serviceApi) return;
+    try {
+      const enhancement = (await serviceApi.enhanceCampaign({ input: source, style: styleProfile, selectedAngleId: angleId })) as {
+        signal?: string[];
+        sectionDrafts?: CampaignRun['sectionDrafts'];
+        optimizationNotes?: string[];
+        providerMeta?: { llm?: string; model?: string; usage?: { estimatedCostUsd?: number } };
+      };
+      const enhancedRun: CampaignRun = {
+        ...baseRun,
+        signal: enhancement.signal?.length ? enhancement.signal.slice(0, 4) : baseRun.signal,
+        sectionDrafts: enhancement.sectionDrafts?.length ? enhancement.sectionDrafts : baseRun.sectionDrafts,
+        optimizationNotes: [
+          enhancement.providerMeta?.llm
+            ? `Generated with ${enhancement.providerMeta.llm}${enhancement.providerMeta.model ? ` / ${enhancement.providerMeta.model}` : ''}. Estimated cost $${(enhancement.providerMeta.usage?.estimatedCostUsd || 0).toFixed(6)}.`
+            : 'Generated with local fallback.',
+          ...(enhancement.optimizationNotes?.length ? enhancement.optimizationNotes : baseRun.optimizationNotes),
+        ],
+      };
+      // Patch only if this run is still the latest, so we never overwrite a newer manual run.
+      setRuns((prevRuns) => {
+        if (prevRuns[0]?.id !== baseRun.id) return prevRuns;
+        const updated = [enhancedRun, ...prevRuns.slice(1)].slice(0, 8);
+        saveRuns(updated);
+        return updated;
+      });
+      setServiceNotice('LLM/Search enhancement completed.');
+    } catch (error) {
+      setServiceNotice(`LLM/Search enhancement unavailable — showing local result: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Self-optimization loop (Loop Engineer): iteratively rewrite the weakest dimensions,
+  // rescore, and repeat until convergence. Replaces the top run in place, records the
+  // trajectory on the run itself (so it ships into the export dossier), and surfaces a
+  // stop reason + quality gate status in the UI.
+  function runOptimizationLoop() {
+    if (optimizing || runs.length === 0) return;
+    setOptimizing(true);
+    setOptimizationTrajectory(undefined);
+    const baseRun = runs[0];
+    const { run: optimized, trajectory } = optimizeLoop(baseRun, styleProfile);
+    const runWithTrajectory = { ...optimized, trajectory };
+    const updatedRuns = [runWithTrajectory, ...runs.slice(1)].slice(0, 8);
+    setRuns(updatedRuns);
+    saveRuns(updatedRuns);
+    setOptimizationTrajectory(trajectory);
+    const gateNote = trajectory.qualityGate.passed ? '质量门槛已通过' : '质量门槛未通过';
+    setServiceNotice(
+      `Loop Engineer 完成：${trajectory.iterations} 轮 ${trajectory.stopReason} · ${gateNote} · ${trajectory.rollbackCount} 次回滚。`,
+    );
+    setOptimizing(false);
   }
 
   async function generateAndGo(nextStep: WorkflowStepId, angleId = selectedAngleId) {
     await generate(angleId);
     setActiveStep(nextStep);
     window.setTimeout(() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
+
+  // One-click full pipeline: drive Topic -> ... -> Review automatically, recomputing at
+  // every real transition and animating through each step so the progress is visible.
+  async function runFullPipeline(startFrom: WorkflowStepId = 'insight') {
+    if (autoRunning) return;
+    if (!source.title.trim() && !source.sourceText.trim() && !source.url.trim()) {
+      setServiceNotice('Pick a news item or fill in a source first, then run the full pipeline.');
+      return;
+    }
+    setAutoRunning(true);
+    const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+    // The ordered chain of transitions the manual buttons would perform. Each entry pairs a
+    // human-readable label (shown in the progress indicator) with the work to do at that stage.
+    const chain: { label: string; step: WorkflowStepId; recompute: boolean }[] = [
+      { label: 'Building insight', step: 'insight', recompute: true },
+      { label: 'Confirming research', step: 'research', recompute: false },
+      { label: 'Defining goal', step: 'goal', recompute: false },
+      { label: 'Designing structure', step: 'structure', recompute: false },
+      { label: 'Running topic meeting', step: 'meeting', recompute: false },
+      { label: 'Applying voice', step: 'style', recompute: false },
+      { label: 'Writing sections', step: 'draft', recompute: true },
+      { label: 'Reviewing score', step: 'score', recompute: false },
+    ];
+    const startIndex = chain.findIndex((item) => item.step === startFrom);
+    try {
+      for (let i = Math.max(0, startIndex); i < chain.length; i += 1) {
+        const { label, step, recompute } = chain[i];
+        setAutoRunStep(label);
+        if (recompute) {
+          await generate(selectedAngleId);
+        }
+        setActiveStep(step);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Give each stage a beat so the user sees the work happening step by step.
+        await wait(700);
+      }
+      setServiceNotice('Full pipeline complete — review the scores and export your campaign.');
+    } catch (error) {
+      setServiceNotice(`Auto-run stopped: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAutoRunning(false);
+      setAutoRunStep('');
+    }
   }
 
   async function selectAngle(angle: Angle) {
@@ -303,7 +420,7 @@ export function App() {
   }
 
   function downloadRun() {
-    const markdown = exportMarkdown(currentRun, styleProfile, newsAggregation, topicEvaluation);
+    const markdown = exportMarkdown(currentRun, styleProfile, newsAggregation, topicEvaluation, currentRun.trajectory);
     const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -377,7 +494,7 @@ export function App() {
           <div className="signal-map" aria-hidden="true">
             <div className="map-node large">News</div>
             <div className="map-line" />
-            <div className="map-node">Start</div>
+            <div className="map-node">Topic</div>
             <div className="map-line" />
             <div className="map-node">Write</div>
             <div className="map-line" />
@@ -395,20 +512,18 @@ export function App() {
               <Settings2 size={18} />
               <h2>Settings</h2>
             </div>
-            <p className="settings-note">配置是全局项，不占用写作流程。桌面版会把 API key 保存到 Electron 主进程安全存储，并通过主进程执行真实联网检索和模型生成。</p>
+            <p className="settings-note">配置是全局项，不占用写作流程。桌面版通过 Electron 主进程执行真实联网检索和模型生成，key 存安全存储；浏览器版直接调用各 API，key 存浏览器 localStorage。</p>
             <div className="config-banner">
               <strong>{secureLlmKeyCount || secureSearchKeyCount ? 'Production services configured' : 'Local rules only'}</strong>
               <span>
-                {desktopInfo?.api
-                  ? `${secureLlmKeyCount} 个 LLM key，${secureSearchKeyCount} 个 Search key。安全存储：${serviceStatus?.encryptionAvailable ? '可用' : '不可用，使用系统降级存储'}。`
-                  : secureLlmKeyCount || secureSearchKeyCount
-                    ? `${secureLlmKeyCount} 个 LLM key，${secureSearchKeyCount} 个 Search key 已保存到浏览器。`
-                    : '未配置 key 时使用本地规则降级；配置 key 后，桌面版会优先调用真实 Search / LLM 服务。'}
+                {serviceApi
+                  ? `${secureLlmKeyCount} 个 LLM key，${secureSearchKeyCount} 个 Search key。${isDesktopMode ? `安全存储：${serviceStatus?.encryptionAvailable ? '可用' : '不可用，使用系统降级存储'}。` : '已保存到浏览器 localStorage。'}`
+                  : '未配置服务能力，使用本地规则降级。'}
               </span>
             </div>
             {serviceNotice && <p className="service-notice">{serviceNotice}</p>}
             <div className="ops-grid">
-              <Metric label="Service mode" value={desktopInfo?.api ? 'Electron main process' : 'Browser fallback'} />
+              <Metric label="Service mode" value={isDesktopMode ? 'Electron main process' : serviceApi ? 'Browser direct fetch' : 'Local rules only'} />
               <Metric label="Calls" value={`${usage?.calls || 0}`} />
               <Metric label="Tokens" value={`${usage?.inputTokens || 0} in / ${usage?.outputTokens || 0} out`} />
               <Metric label="Estimated cost" value={`$${(usage?.estimatedCostUsd || 0).toFixed(6)} / $${usage?.monthlyBudgetUsd || 10}`} />
@@ -486,17 +601,30 @@ export function App() {
           </nav>
 
           <section className="flow-stage">
+            {autoRunning && (
+              <div className="auto-run-banner" role="status" aria-live="polite">
+                <RefreshCw size={17} className="spin" />
+                <strong>Auto-running full pipeline</strong>
+                <span>{autoRunStep}…</span>
+              </div>
+            )}
             {activeStep === 'input' && (
               <FlowCard
                 icon={<BookOpen size={19} />}
                 kicker="Step 2"
                 title="确认新闻素材，或手动输入 URL / 文本"
-                description="你可以从 News 点进来，也可以自己填 URL、标题、目标读者、产品上下文和 source notes。确认后进入信号提取。"
+                description="点击任意一条新闻即可自动填入。也可以自己填 URL、标题、目标读者、产品上下文和 source notes。确认后进入信号提取。"
                 action={
-                  <button className="primary-button" onClick={() => generateAndGo('insight')}>
-                    Build insight
-                    <ArrowRight size={18} />
-                  </button>
+                  <div className="flow-action-group">
+                    <button className="secondary-button auto-run-button" onClick={() => runFullPipeline()} disabled={autoRunning}>
+                      <Sparkles size={18} />
+                      {autoRunning ? 'Running…' : 'Auto-run all'}
+                    </button>
+                    <button className="primary-button" onClick={() => generateAndGo('insight')} disabled={autoRunning}>
+                      Build insight
+                      <ArrowRight size={18} />
+                    </button>
+                  </div>
                 }
               >
                 <div className="input-flow-grid">
@@ -529,7 +657,7 @@ export function App() {
                 icon={<Newspaper size={19} />}
                 kicker="Step 1"
                 title="先浏览新闻池，再决定写什么"
-                description="参考 TrendRadar 的思路：多源热榜/RSS、URL+来源去重、记录首次出现、最后出现、刷新次数和新增数量。看到值得写的新闻，点击标题进入 Start。"
+                description="参考 TrendRadar 的思路：多源热榜/RSS、URL+来源去重、记录首次出现、最后出现、刷新次数和新增数量。看到值得写的新闻，点击卡片即可进入 Topic。"
                 action={
                   <button className="primary-button" onClick={() => setActiveStep('input')}>
                     Use my own source
@@ -557,16 +685,25 @@ export function App() {
                 </div>
                 <div className="news-list">
                   {newsAggregation.items.map((item) => (
-                    <article className={item.isNew ? 'news-card is-new' : 'news-card'} key={item.id}>
+                    <article
+                      className={item.isNew ? 'news-card is-new' : 'news-card'}
+                      key={item.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Select news: ${item.title}`}
+                      onClick={() => selectNewsItem(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectNewsItem(item);
+                        }
+                      }}
+                    >
                       <div className="news-meta">
                         <span>{item.sourceName}</span>
                         <strong>#{item.rank}</strong>
                       </div>
-                      <h3>
-                        <button className="news-title-button" onClick={() => selectNewsItem(item)}>
-                          {item.title}
-                        </button>
-                      </h3>
+                      <h3 className="news-title-button">{item.title}</h3>
                       <p>{item.summary}</p>
                       <div className="news-footer">
                         <small>{item.isNew ? 'New' : `Seen ${item.seenCount}x`}</small>
@@ -869,14 +1006,57 @@ export function App() {
                 icon={<Gauge size={19} />}
                 kicker="Step 10"
                 title="评分、优化建议和导出"
-                description="这里是最终复盘：判断 hook、风格匹配、可信度和 AI 味风险。"
+                description="这里是最终复盘：判断 hook、风格匹配、可信度和 AI 味风险。点击 Auto-optimize 让 Loop Engineer 自动迭代重写最弱维度并重评分，直到收敛。"
                 action={
-                  <button className="primary-button" onClick={downloadRun}>
-                    Export campaign
-                    <Download size={18} />
-                  </button>
+                  <div className="flow-action-group">
+                    <button className="secondary-button auto-run-button" onClick={runOptimizationLoop} disabled={optimizing || runs.length === 0}>
+                      <RefreshCw size={18} className={optimizing ? 'spin' : ''} />
+                      {optimizing ? 'Optimizing…' : 'Auto-optimize'}
+                    </button>
+                    <button className="primary-button" onClick={downloadRun}>
+                      Export campaign
+                      <Download size={18} />
+                    </button>
+                  </div>
                 }
               >
+                {optimizationTrajectory && (
+                  <div className="loop-trajectory">
+                    <strong>
+                      Loop Engineer · {optimizationTrajectory.engine.name} {optimizationTrajectory.engine.version} ·{' '}
+                      {optimizationTrajectory.iterations} 轮 ·{' '}
+                      {optimizationTrajectory.stopReason}
+                    </strong>
+                    <div className="loop-meta">
+                      <span className={`loop-badge ${optimizationTrajectory.qualityGate.passed ? 'ok' : 'fail'}`}>
+                        质量门槛 {optimizationTrajectory.qualityGate.passed ? '已通过' : '未通过'}（floor {optimizationTrajectory.qualityGate.minOverall}）
+                      </span>
+                      {optimizationTrajectory.rollbackCount > 0 && (
+                        <span className="loop-badge warn">{optimizationTrajectory.rollbackCount} 次回滚</span>
+                      )}
+                      <span className="loop-badge neutral">
+                        最小迭代 {optimizationTrajectory.options.minIterations} · 提升阈值 {optimizationTrajectory.options.improvementThreshold}
+                      </span>
+                    </div>
+                    <div className="loop-passes">
+                      {optimizationTrajectory.passes.map((pass) => (
+                        <div className={`loop-pass ${pass.rolledBack ? 'rolled-back' : ''}`} key={pass.iteration}>
+                          <span className="loop-pass-label">
+                            第 {pass.iteration} 轮 · 总体 {pass.overallBefore} → {pass.overallAfter}
+                            {pass.rolledBack && ' · 已回滚'}
+                          </span>
+                          <span className="loop-pass-targets">目标：{pass.targets.join('、')}</span>
+                          <span className="loop-pass-gains">
+                            {pass.improvements.length ? `提升：${pass.improvements.join('；')}` : '无显著提升'}
+                          </span>
+                          {pass.regressions.length > 0 && (
+                            <span className="loop-pass-regressions">退化：{pass.regressions.join('；')}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="review-grid">
                   <div className="scores">
                     {Object.entries(currentRun.scores).map(([key, value]) => (

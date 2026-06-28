@@ -73,6 +73,19 @@ async function run() {
 
     const readTitle = async () => (await page.locator('.flow-card h2').first().textContent())?.trim();
 
+    // The browser runs without the Electron main process, so the browser service issues
+    // real network calls (CORS proxy, search/LLM APIs). Fulfill external requests with a
+    // quick empty payload so the service falls back to local rules deterministically and
+    // fast, without the retry backoff delay. Scenario B later installs an overriding
+    // route that returns real RSS XML and takes precedence over this one.
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+      if (url.startsWith(baseUrl) || url.includes('localhost') || url.includes('127.0.0.1')) {
+        return route.fallback();
+      }
+      return route.fulfill({ status: 200, contentType: 'application/xml', body: '<rss><channel></channel></rss>' });
+    });
+
     await page.goto(baseUrl);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -82,28 +95,47 @@ async function run() {
       nodes.map((node) => node.textContent.replace(/\s+/g, ' ').trim()),
     );
     assert(steps.length === 10, 'Workflow should expose 10 steps', steps);
-    assert(steps[0].includes('News') && steps[1].includes('Start'), 'Workflow should begin with News then Start', steps.slice(0, 2));
+    assert(steps[0].includes('News') && steps[1].includes('Topic'), 'Workflow should begin with News then Topic', steps.slice(0, 2));
     assert((await readTitle()) === '先浏览新闻池，再决定写什么', 'E2E must start at News', await readTitle());
     assert((await page.locator('.news-title-button').count()) >= 8, 'News should render selectable material items');
     events.push('News pool loaded');
 
+    const refreshCount = (text) => Number((text.match(/刷新 (\d+) 次/) || [])[1] || 0);
+    const countBefore = refreshCount(await page.locator('.news-toolbar span').first().textContent());
     await page.getByRole('button', { name: /Incremental refresh/i }).click();
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(400);
     const refreshText = await page.locator('.news-toolbar span').first().textContent();
-    assert(/刷新 2 次/.test(refreshText || ''), 'News refresh should be incremental', refreshText);
+    const countAfter = refreshCount(refreshText);
+    assert(countAfter === countBefore + 1, 'News refresh should be incremental (count increments by 1)', { countBefore, countAfter, refreshText });
     events.push('News refreshed incrementally');
 
-    await page.locator('.news-title-button').nth(1).click();
+    await page.locator('.news-card').nth(1).click();
     await page.waitForTimeout(200);
-    assert((await readTitle()) === '确认新闻素材，或手动输入 URL / 文本', 'Selecting news should enter Start', await readTitle());
+    assert((await readTitle()) === '确认新闻素材，或手动输入 URL / 文本', 'Selecting news should enter Topic', await readTitle());
     const inputs = page.locator('.input-flow-grid input');
     const url = await inputs.nth(0).inputValue();
     const title = await inputs.nth(1).inputValue();
+    const audience = await inputs.nth(2).inputValue();
+    const productContext = await page.locator('.input-flow-grid textarea').nth(0).inputValue();
     const sourceNotes = await page.locator('textarea.tall').inputValue();
     assert(url.startsWith('https://example.com/'), 'Selected news should populate URL', url);
     assert(title.length > 20, 'Selected news should populate working title', title);
-    assert(sourceNotes.includes('Source:') && sourceNotes.includes('Relevance:'), 'Selected news should populate source notes', sourceNotes);
-    events.push('News item selected as material');
+    assert(audience === '', 'Fields missing from News (audience) should be empty', audience);
+    assert(productContext === '', 'Fields missing from News (productContext) should be empty', productContext);
+    assert(
+      sourceNotes.includes('Source:') && sourceNotes.includes('Relevance:') && sourceNotes.includes('Summary:') && sourceNotes.includes('Rank:'),
+      'Selected news should populate all available News fields into source notes',
+      sourceNotes,
+    );
+    events.push('News card body click fills Topic with all News fields');
+
+    await page.locator('[aria-label="Writing workflow steps"] button').first().click();
+    await page.waitForTimeout(150);
+    await page.locator('.news-card').first().click();
+    await page.waitForTimeout(200);
+    const secondUrl = await inputs.nth(0).inputValue();
+    assert(secondUrl.startsWith('https://example.com/'), 'Clicking a different card should re-fill Topic inputs', secondUrl);
+    events.push('Whole news card is clickable');
 
     await inputs.nth(2).fill('AI builders, indie hackers, and content operators');
     await page.locator('.input-flow-grid textarea').nth(0).fill('E2E product context: turn one selected news item into an engineered article, platform assets, and final dossier.');
@@ -178,7 +210,7 @@ async function run() {
     await page.getByRole('button', { name: /Optimize/i }).click();
     await page.waitForTimeout(150);
     const afterOptimize = await page.locator('.asset-output h3').textContent();
-    assert(afterOptimize.includes('Optimized') && afterOptimize !== beforeOptimize, 'Optimize should update active asset');
+    assert(/Optimized|已优化/.test(afterOptimize) && afterOptimize !== beforeOptimize, 'Optimize should update active asset');
     await page.locator('.asset-output .icon-button').click();
     await page.waitForTimeout(150);
     assert((await page.locator('.copy-toast').count()) === 1, 'Copy should show toast');
@@ -214,6 +246,86 @@ async function run() {
     await page.waitForTimeout(100);
     assert((await readTitle()) === '先浏览新闻池，再决定写什么', 'Start over should return to News');
     events.push('Returned to News');
+
+    // --- Scenario A2: ONE-CLICK auto-run drives Topic -> Review without manual clicks ---
+    await page.locator('.news-card').first().click();
+    await page.waitForTimeout(200);
+    assert((await readTitle()) === '确认新闻素材，或手动输入 URL / 文本', 'Selecting news should enter Topic for auto-run', await readTitle());
+    // The single auto-run button should exist and be enabled.
+    const autoRunButton = page.getByRole('button', { name: /Auto-run all/i });
+    assert(await autoRunButton.isEnabled(), 'Auto-run button should be enabled on Topic step');
+    await autoRunButton.click();
+    // The pipeline animates through 8 stages with ~700ms each; wait generously for it to land on Review.
+    await page.waitForFunction(() => /评分/.test(document.querySelector('.flow-card h2')?.textContent || ''), null, { timeout: 15_000 });
+    assert(/评分/.test((await readTitle()) || ''), 'One-click auto-run should land on the Review step', await readTitle());
+    // Banner disappears when auto-run finishes (after the final stage's animation delay).
+    await page.waitForTimeout(1500);
+    assert((await page.locator('.auto-run-banner').count()) === 0, 'Auto-run banner should disappear when complete');
+    // The draft step data was produced (sections + assets) without any further manual clicks.
+    await page.locator('[aria-label="Writing workflow steps"] button').nth(8).click(); // Write step
+    await page.waitForTimeout(150);
+    const autoDrafts = await page.locator('.section-draft-card pre').count();
+    assert(autoDrafts >= 4, 'Auto-run should have produced full section drafts', autoDrafts);
+    events.push('One-click auto-run reached Review with full output');
+
+    await page.getByRole('button', { name: /Start over/i }).click();
+    await page.waitForTimeout(100);
+    events.push('Returned to News after auto-run');
+
+    // --- Scenario B: the browser service loads REAL RSS via fetch (mocked), no example.com ---
+    const mockedRss = `<?xml version="1.0"?><rss><channel>
+      <item><title><![CDATA[WordStar: A Writer's Word Processor]]></title><link>https://www.sfwriter.com/wordstar.htm</link><description>Classic word processor.</description></item>
+      <item><title><![CDATA[Show HN: open-source marketing agent]]></title><link>https://github.com/example/agent</link><description>Content workflow agent.</description></item>
+    </channel></rss>`;
+    await page.route((url) => url.toString().includes('allorigins'), (route) => route.fulfill({ status: 200, contentType: 'application/xml', body: mockedRss }));
+    await page.getByRole('button', { name: /Incremental refresh/i }).click();
+    await page.waitForTimeout(600);
+    const firstCardTitle = await page.locator('.news-card h3').first().textContent();
+    assert(
+      firstCardTitle.includes('WordStar') || (firstCardTitle || '').includes('marketing agent'),
+      'Mocked RSS should surface real titles',
+      firstCardTitle,
+    );
+    events.push('Browser service fetches real RSS (mocked)');
+
+    // Selecting the real-RSS card should fill the Topic URL with a real (non-example.com) link.
+    await page.locator('.news-card').first().click();
+    await page.waitForTimeout(200);
+    const realTopicUrl = await page.locator('.input-flow-grid input').nth(0).inputValue();
+    assert(!realTopicUrl.includes('example.com') && realTopicUrl.startsWith('https://'), 'Topic URL should be the real source from RSS', realTopicUrl);
+    events.push('Real RSS URL flows into Topic');
+    // The mocked-RSS route stays registered; subsequent scenarios do not refresh news
+    // and do not touch external RSS, so it is harmless to leave in place.
+
+    // --- Scenario C: every workflow step button responds (no dead buttons) ---
+    await page.getByRole('button', { name: /Start over/i }).click();
+    await page.waitForTimeout(100);
+    const stepButtons = page.locator('[aria-label="Writing workflow steps"] button');
+    const stepCount = await stepButtons.count();
+    for (let i = 0; i < stepCount; i += 1) {
+      const titleBefore = await readTitle();
+      await stepButtons.nth(i).click();
+      await page.waitForTimeout(80);
+      const stepLabel = (await stepButtons.nth(i).textContent()).replace(/\s+/g, ' ').trim();
+      assert((await readTitle()) !== titleBefore || i === 0, `Step button "${stepLabel}" should change the active step`, { stepLabel });
+    }
+    events.push('All workflow step buttons respond');
+
+    // --- Scenario D: Settings panel accepts and persists API keys ---
+    await page.locator('a[href="#settings"]').click();
+    await page.waitForTimeout(150);
+    assert((await page.locator('.settings-panel').count()) === 1, 'Settings panel should open');
+    const llmInput = page.locator('.provider-grid input').first();
+    await llmInput.fill('sk-e2e-openai-key');
+    await page.waitForTimeout(150);
+    const savedLlmKey = await page.evaluate(() => {
+      const raw = localStorage.getItem('wlm.runtimeConfig');
+      return raw ? JSON.parse(raw).llmKeys.openai : '';
+    });
+    assert(savedLlmKey === 'sk-e2e-openai-key', 'LLM key should persist to browser storage', savedLlmKey);
+    const bannerText = await page.locator('.config-banner strong').textContent();
+    assert(/Production services configured/.test(bannerText || ''), 'Settings banner should reflect configured state', bannerText);
+    events.push('Settings key entry persists to storage');
 
     assert(runtimeIssues.length === 0, 'No console warnings/errors should occur', runtimeIssues);
 

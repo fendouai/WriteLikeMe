@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -15,6 +15,10 @@ const distIndexPath = join(root, 'dist', 'index.html');
 const mainSource = readFileSync(mainPath, 'utf8');
 const preloadSource = readFileSync(preloadPath, 'utf8');
 const distIndex = readFileSync(distIndexPath, 'utf8');
+const distAssets = readdirSync(join(root, 'dist', 'assets'))
+  .filter((file) => file.endsWith('.js'))
+  .map((file) => readFileSync(join(root, 'dist', 'assets', file), 'utf8'))
+  .join('\n');
 
 check('package main points to Electron main process', pkg.main === 'electron/main.cjs');
 check('Electron main process exists', existsSync(mainPath));
@@ -29,6 +33,8 @@ check('preload exposes desktop bridge', preloadSource.includes('writeLikeMeDeskt
 check('electron-builder appId configured', pkg.build?.appId === 'ai.fendou.writelikeme');
 check('electron-builder includes dist', pkg.build?.files?.includes('dist/**/*'));
 check('dist index references built assets', /assets\/index-.*\.js/.test(distIndex));
+check('browser service bundled into client assets', distAssets.includes('allorigins.win'));
+check('unit test script registered', typeof pkg.scripts['test:unit'] === 'string' && pkg.scripts['test:unit'].includes('vitest'));
 
 const failed = checks.filter((item) => !item.ok);
 for (const item of checks) {

@@ -1,4 +1,4 @@
-import type { CampaignRun, NewsAggregation, SourceInput, StyleProfile, TopicEvaluation } from './agentEngine';
+import type { CampaignRun, NewsAggregation, SourceInput, StyleProfile, TopicEvaluation, OptimizationTrajectory } from './agentEngine';
 
 const sourceKey = 'wlm.source';
 const styleKey = 'wlm.style';
@@ -99,7 +99,13 @@ export function saveRuns(runs: CampaignRun[]): void {
   localStorage.setItem(runsKey, JSON.stringify(runs.slice(0, 8)));
 }
 
-export function exportMarkdown(run: CampaignRun, profile: StyleProfile, news?: NewsAggregation, topicEvaluation?: TopicEvaluation): string {
+export function exportMarkdown(
+  run: CampaignRun,
+  profile: StyleProfile,
+  news?: NewsAggregation,
+  topicEvaluation?: TopicEvaluation,
+  trajectory?: OptimizationTrajectory,
+): string {
   return [
     `# WriteLikeMe Campaign`,
     '',
@@ -205,6 +211,30 @@ export function exportMarkdown(run: CampaignRun, profile: StyleProfile, news?: N
       '',
     ]),
     '',
+    ...(trajectory
+      ? [
+          `## Loop Engineer`,
+          `- Engine: ${trajectory.engine.name} ${trajectory.engine.version}`,
+          `- Iterations: ${trajectory.iterations}`,
+          `- Stop reason: ${trajectory.stopReason}`,
+          `- Converged: ${trajectory.converged}`,
+          `- Rollbacks: ${trajectory.rollbackCount}`,
+          `- Quality gate: ${trajectory.qualityGate.passed ? 'passed' : 'failed'} (overall floor ${trajectory.qualityGate.minOverall}, current overall ${trajectory.qualityGate.convergedOrCapped ? 'measured' : 'pending'})`,
+          `- Start overall: ${Math.round(Object.values(trajectory.scoresStart).reduce((sum, v) => sum + v, 0) / Object.values(trajectory.scoresStart).length)}`,
+          `- End overall: ${Math.round(Object.values(trajectory.scoresEnd).reduce((sum, v) => sum + v, 0) / Object.values(trajectory.scoresEnd).length)}`,
+          `- Convergence thresholds: minIterations=${trajectory.options.minIterations}, improvementThreshold=${trajectory.options.improvementThreshold}, maxRegressions=${trajectory.options.maxRegressions}`,
+          '',
+          ...trajectory.passes.flatMap((pass) => [
+            `### Pass ${pass.iteration}`,
+            `- Quality gate: ${pass.qualityGate}${pass.rolledBack ? ` (rolled back: ${pass.rollbackReason})` : ''}`,
+            `- Overall: ${pass.overallBefore} → ${pass.overallAfter}`,
+            `- Targets: ${pass.targets.join('、')}`,
+            `- Improvements: ${pass.improvements.length ? pass.improvements.join('；') : 'none'}`,
+            `- Regressions: ${pass.regressions.length ? pass.regressions.join('；') : 'none'}`,
+            '',
+          ]),
+        ]
+      : []),
     `## Scores`,
     `- Hook: ${run.scores.hook}`,
     `- Novelty: ${run.scores.novelty}`,
