@@ -25,6 +25,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   analyzeStyle,
+  buildTopicBatchReport,
   evaluateTopic,
   optimizeAsset,
   optimizeLoop,
@@ -131,6 +132,7 @@ export function App() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoRunStep, setAutoRunStep] = useState('');
   const [optimizing, setOptimizing] = useState(false);
+  const [batchGenerating, setBatchGenerating] = useState(false);
   const [optimizationTrajectory, setOptimizationTrajectory] = useState<OptimizationTrajectory | undefined>(undefined);
   const [serviceStatus, setServiceStatus] = useState<{ encryptionAvailable: boolean; llm: Record<string, boolean>; search: Record<string, boolean> }>();
   const [usage, setUsage] = useState<{ calls?: number; inputTokens?: number; outputTokens?: number; estimatedCostUsd?: number; monthlyBudgetUsd?: number }>();
@@ -344,6 +346,19 @@ export function App() {
       `Loop Engineer 完成：${trajectory.iterations} 轮 ${trajectory.stopReason} · ${gateNote} · ${trajectory.rollbackCount} 次回滚。`,
     );
     setOptimizing(false);
+  }
+
+  function generateTopicBatch() {
+    if (batchGenerating || runs.length === 0) return;
+    setBatchGenerating(true);
+    const baseRun = runs[0];
+    const topicBatch = buildTopicBatchReport(baseRun, styleProfile, newsAggregation, 10);
+    const updatedRun = { ...baseRun, topicBatch };
+    const updatedRuns = [updatedRun, ...runs.slice(1)].slice(0, 8);
+    setRuns(updatedRuns);
+    saveRuns(updatedRuns);
+    setServiceNotice(`已生成 ${topicBatch.items.length} 个 topic 与 ${topicBatch.items.length} 条推文，并完成流程分析。`);
+    setBatchGenerating(false);
   }
 
   async function generateAndGo(nextStep: WorkflowStepId, angleId = selectedAngleId) {
@@ -1009,6 +1024,10 @@ export function App() {
                 description="这里是最终复盘：判断 hook、风格匹配、可信度和 AI 味风险。点击 Auto-optimize 让 Loop Engineer 自动迭代重写最弱维度并重评分，直到收敛。"
                 action={
                   <div className="flow-action-group">
+                    <button className="secondary-button auto-run-button" onClick={generateTopicBatch} disabled={batchGenerating || runs.length === 0}>
+                      <Sparkles size={18} />
+                      {batchGenerating ? 'Generating…' : 'Generate 10 topics'}
+                    </button>
                     <button className="secondary-button auto-run-button" onClick={runOptimizationLoop} disabled={optimizing || runs.length === 0}>
                       <RefreshCw size={18} className={optimizing ? 'spin' : ''} />
                       {optimizing ? 'Optimizing…' : 'Auto-optimize'}
@@ -1075,6 +1094,62 @@ export function App() {
                     ))}
                   </div>
                 </div>
+                {currentRun.topicBatch && (
+                  <div className="topic-batch-report">
+                    <div className="topic-batch-summary">
+                      <strong>Topic Batch Report</strong>
+                      <p>{currentRun.topicBatch.summary}</p>
+                    </div>
+                    <div className="topic-batch-grid">
+                      <div className="topic-batch-column">
+                        <h3>Workflow artifacts</h3>
+                        {currentRun.topicBatch.aggregateWorkflowReviews.map((review) => (
+                          <div className="batch-score-row" key={`workflow-${review.label}`}>
+                            <span>{review.label}</span>
+                            <strong>{review.score}</strong>
+                            <small>{review.note}</small>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="topic-batch-column">
+                        <h3>Final outputs</h3>
+                        {currentRun.topicBatch.aggregateFinalReviews.map((review) => (
+                          <div className="batch-score-row" key={`final-${review.label}`}>
+                            <span>{review.label}</span>
+                            <strong>{review.score}</strong>
+                            <small>{review.note}</small>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="topic-batch-actions">
+                      {currentRun.topicBatch.processOptimizations.map((note) => (
+                        <p key={note}>{note}</p>
+                      ))}
+                    </div>
+                    <div className="topic-batch-list">
+                      {currentRun.topicBatch.items.map((item, index) => (
+                        <article className="topic-batch-card" key={item.id}>
+                          <div className="topic-batch-head">
+                            <span>#{index + 1} · {item.sourceLabel}</span>
+                            <strong>{item.topic}</strong>
+                          </div>
+                          <pre>{item.tweet}</pre>
+                          <div className="topic-batch-metrics">
+                            <small>Workflow {item.workflowScore}</small>
+                            <small>Final {item.finalScore}</small>
+                            <small>Loop {item.loopIterations}</small>
+                          </div>
+                          <div className="topic-batch-notes">
+                            {item.optimizationNotes.map((note) => (
+                              <p key={note}>{note}</p>
+                            ))}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </FlowCard>
             )}
 

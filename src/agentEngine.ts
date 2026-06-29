@@ -183,6 +183,47 @@ export type CampaignRun = {
   sourceSnapshot?: SourceInput;
   /** Set when the Loop Engineer has run on this run; persisted so the dossier can audit it. */
   trajectory?: OptimizationTrajectory;
+  /** Optional batch exploration layer: 10 candidate topics, 10 tweets, workflow/final analysis,
+   *  and process-level optimizations derived from those samples. */
+  topicBatch?: TopicBatchReport;
+};
+
+export type TopicArtifactReview = {
+  label: string;
+  score: number;
+  note: string;
+};
+
+export type TopicTweetItem = {
+  id: string;
+  topic: string;
+  sourceLabel: string;
+  tweet: string;
+  workflowReviews: TopicArtifactReview[];
+  workflowScore: number;
+  finalReviews: TopicArtifactReview[];
+  finalScore: number;
+  loopIterations: number;
+  stopReason: 'quality-threshold' | 'max-iterations' | 'no-improvement';
+  optimizationNotes: string[];
+};
+
+export type TopicBatchSummary = {
+  averageWorkflowScore: number;
+  averageFinalScore: number;
+  strongestTopic: string;
+  weakestTopic: string;
+  workflowOptimizations: string[];
+  finalOptimizations: string[];
+};
+
+export type TopicBatchReport = {
+  createdAt: string;
+  summary: string;
+  items: TopicTweetItem[];
+  aggregateWorkflowReviews: TopicArtifactReview[];
+  aggregateFinalReviews: TopicArtifactReview[];
+  processOptimizations: string[];
 };
 
 const stopWords = new Set([
@@ -1008,6 +1049,53 @@ export function optimizeLoop(
   };
 }
 
+export function buildTopicBatchReport(
+  run: CampaignRun,
+  style: StyleProfile,
+  news?: NewsAggregation,
+  count = 10,
+): TopicBatchReport {
+  const candidates = buildTopicCandidates(run, news).slice(0, count);
+  const items = candidates.map((candidate, index) => {
+    const initialTweet = buildTopicTweet(candidate.topic, candidate.sourceLabel, run, style, index);
+    const optimized = optimizeTopicTweet(initialTweet, candidate.topic, candidate.sourceLabel, run, style);
+    const workflowReviews = evaluateWorkflowArtifacts(run, candidate.sourceLabel, candidate.topic);
+    const finalReviews = evaluateFinalTweet(optimized.tweet, style, candidate.topic, candidate.sourceLabel);
+    return {
+      id: candidate.id,
+      topic: candidate.topic,
+      sourceLabel: candidate.sourceLabel,
+      tweet: optimized.tweet,
+      workflowReviews,
+      workflowScore: averageTopicScore(workflowReviews),
+      finalReviews,
+      finalScore: averageTopicScore(finalReviews),
+      loopIterations: optimized.iterations,
+      stopReason: optimized.stopReason,
+      optimizationNotes: optimized.notes,
+    } satisfies TopicTweetItem;
+  });
+
+  const aggregateWorkflowReviews = aggregateTopicReviews(items.flatMap((item) => item.workflowReviews));
+  const aggregateFinalReviews = aggregateTopicReviews(items.flatMap((item) => item.finalReviews));
+  const strongest = [...items].sort((a, b) => b.finalScore - a.finalScore)[0];
+  const weakest = [...items].sort((a, b) => a.finalScore - b.finalScore)[0];
+  const processOptimizations = buildBatchOptimizations(aggregateWorkflowReviews, aggregateFinalReviews);
+
+  return {
+    createdAt: new Date().toISOString(),
+    summary: `共生成 ${items.length} 个 topic / ${items.length} 条推文。平均工作流得分 ${averageTopicScore(aggregateWorkflowReviews)}，平均最终产物得分 ${averageTopicScore(aggregateFinalReviews)}。`,
+    items,
+    aggregateWorkflowReviews,
+    aggregateFinalReviews,
+    processOptimizations: [
+      `最强 topic：${strongest?.topic || 'N/A'}（${strongest?.finalScore || 0}）`,
+      `最弱 topic：${weakest?.topic || 'N/A'}（${weakest?.finalScore || 0}）`,
+      ...processOptimizations,
+    ],
+  };
+}
+
 function buildResearchDossier(input: SourceInput, style: StyleProfile): ResearchDossier {
   const body = `${input.title} ${input.sourceText} ${input.productContext}`;
   const keywords = extractKeywords(body, 10);
@@ -1061,6 +1149,221 @@ function buildResearchDossier(input: SourceInput, style: StyleProfile): Research
       { label: '避免', detail: style.forbidden.join('、') },
     ],
   };
+}
+
+function buildTopicCandidates(
+  run: CampaignRun,
+  news?: NewsAggregation,
+): { id: string; topic: string; sourceLabel: string }[] {
+  const angleCandidates = run.angles.map((angle) => ({
+    id: `angle:${angle.id}`,
+    topic: angle.headline,
+    sourceLabel: `Angle · ${angle.label}`,
+  }));
+  const newsCandidates = (news?.items || []).slice(0, 5).map((item, index) => ({
+    id: `news:${item.id}`,
+    topic: item.title,
+    sourceLabel: `${item.sourceName} #${item.rank}`,
+  }));
+
+  const merged = [...angleCandidates, ...newsCandidates];
+  const unique = new Map<string, { id: string; topic: string; sourceLabel: string }>();
+  for (const candidate of merged) {
+    const key = topicLabel(candidate.topic).toLowerCase();
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const initialResults = [...unique.values()];
+  if (initialResults.length >= 10) return initialResults;
+
+  const sectionCandidates = run.sectionDrafts.slice(0, 10 - initialResults.length).map((section, index) => ({
+    id: `section:${index}`,
+    topic: `${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)} · ${section.title}`,
+    sourceLabel: `Section · ${section.title}`,
+  }));
+  for (const candidate of sectionCandidates) {
+    const key = topicLabel(candidate.topic).toLowerCase();
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const fallbackTopics = [
+    `为什么「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」值得现在写`,
+    `围绕「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」的用户痛点`,
+    `关于「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」的反常识判断`,
+    `把「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」写成可发布内容的流程`,
+    `「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」对创作者真正改变了什么`,
+    `用「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」做一次高质量内容实验`,
+    `如果只保留一个观点，我会怎么写「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」`,
+    `从信号到推文：如何围绕「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」快速发布`,
+    `关于「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」最容易被忽略的一步`,
+    `判断「${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)}」值不值得写的 3 个问题`,
+  ];
+  for (let index = 0; unique.size < 10 && index < fallbackTopics.length; index += 1) {
+    const topic = fallbackTopics[index];
+    const key = topicLabel(topic).toLowerCase();
+    if (!unique.has(key)) {
+      unique.set(key, {
+        id: `fallback:${index}`,
+        topic,
+        sourceLabel: `Fallback · ${index + 1}`,
+      });
+    }
+  }
+
+  const results = [...unique.values()];
+  while (results.length < 10) {
+    const index = results.length + 1;
+    results.push({
+      id: `reserve:${index}`,
+      topic: `${topicLabel(run.sourceSnapshot?.title || run.writingObjective.uniqueValue)} · 主题扩展 ${index}`,
+      sourceLabel: `Reserve · ${index}`,
+    });
+  }
+
+  return results;
+}
+
+function buildTopicTweet(
+  topic: string,
+  sourceLabel: string,
+  run: CampaignRun,
+  style: StyleProfile,
+  index: number,
+): string {
+  const angle = run.angles[index % run.angles.length];
+  const signal = run.signal[index % run.signal.length]?.replace(/[。.]\s*$/, '') || run.writingObjective.uniqueValue;
+  const audience = run.research.userPersona[0]?.detail || '目标读者';
+  const voice = style.sampleLine.replace(/[。.]\s*$/, '');
+  return [
+    `关于「${topicLabel(topic)}」，我的判断是：${angle.headline}`,
+    `${signal}。`,
+    `${audience} 真正该关心的，不是消息本身，而是它会改变哪个决策。`,
+    `来源：${sourceLabel}。${voice}。`,
+  ].join(' ');
+}
+
+function optimizeTopicTweet(
+  initialTweet: string,
+  topic: string,
+  sourceLabel: string,
+  run: CampaignRun,
+  style: StyleProfile,
+): { tweet: string; iterations: number; stopReason: TopicTweetItem['stopReason']; notes: string[] } {
+  let current = initialTweet;
+  const notes: string[] = [];
+  let lastScore = averageTopicScore(evaluateFinalTweet(current, style, topic, sourceLabel));
+
+  for (let iteration = 1; iteration <= 4; iteration += 1) {
+    const reviews = evaluateFinalTweet(current, style, topic, sourceLabel);
+    const weakest = [...reviews].sort((a, b) => a.score - b.score)[0];
+    if (averageTopicScore(reviews) >= 84) {
+      notes.push(`第 ${iteration} 轮前已达到质量阈值。`);
+      return { tweet: trimTweet(current), iterations: iteration - 1, stopReason: 'quality-threshold', notes };
+    }
+
+    let next = current;
+    if (weakest.label === 'Hook') {
+      next = `先说结论：${trimSentence(topicLabel(topic))} 不该被当成普通热点。 ${current}`;
+    } else if (weakest.label === 'Specificity') {
+      next = `${current} 证据点在 ${sourceLabel}。`;
+    } else if (weakest.label === 'Voice') {
+      next = `${style.signatureMoves[0] || '先给判断，再解释原因'}。 ${current}`;
+    } else if (weakest.label === 'Publishability') {
+      next = current.length > 250 ? current.slice(0, 228).replace(/[，,；;:\s]+$/u, '') + '。' : `${current} 下一步是把它写成一条可验证的内容。`;
+    } else {
+      next = `${current} 这不是观点游戏，而是判断和执行成本的问题。`;
+    }
+
+    next = trimTweet(stripAiFiller(next));
+    const nextScore = averageTopicScore(evaluateFinalTweet(next, style, topic, sourceLabel));
+    if (nextScore <= lastScore) {
+      notes.push(`第 ${iteration} 轮没有带来显著提升，保留上一版。`);
+      return { tweet: trimTweet(current), iterations: iteration, stopReason: 'no-improvement', notes };
+    }
+
+    current = next;
+    lastScore = nextScore;
+    notes.push(`第 ${iteration} 轮提升了 ${weakest.label}。`);
+  }
+
+  return { tweet: trimTweet(current), iterations: 4, stopReason: 'max-iterations', notes };
+}
+
+function evaluateWorkflowArtifacts(run: CampaignRun, sourceLabel: string, topic: string): TopicArtifactReview[] {
+  const evidenceLeadCount = run.research.realUserLeads.length;
+  const sectionCount = run.contentStructure.sections.length;
+  const signalClarity = clampScore(58 + Math.min(26, run.signal.join(' ').length / 18));
+  const audienceSpecificity = clampScore(60 + (/\b(founder|builder|创作者|团队|营销)\b/i.test(run.research.userPersona[0]?.detail || '') ? 24 : 10));
+  const structureReadiness = clampScore(62 + sectionCount * 5);
+  const evidenceReadiness = clampScore(54 + evidenceLeadCount * 10 + (/RSS|#\d+|Hacker News|Product Hunt|知乎|微博/.test(sourceLabel) ? 10 : 0));
+
+  return [
+    { label: 'Signal clarity', score: signalClarity, note: `关于「${topicLabel(topic)}」的核心信号是否已经被压缩成可判断的 3-4 句话。` },
+    { label: 'Audience specificity', score: audienceSpecificity, note: '用户画像是否具体到能判断“谁会因为这个 topic 改变行动”。' },
+    { label: 'Structure readiness', score: structureReadiness, note: '目标与结构是否已经足够清楚，可以直接进入逐段写作。' },
+    { label: 'Evidence readiness', score: evidenceReadiness, note: '真实用户线索和新闻来源是否足够支撑最终表达。' },
+  ];
+}
+
+function evaluateFinalTweet(
+  tweet: string,
+  style: StyleProfile,
+  topic: string,
+  sourceLabel: string,
+): TopicArtifactReview[] {
+  const hook = clampScore(58 + (/(先说结论|我的判断|真正|关键|不是)/.test(tweet) ? 24 : 10));
+  const specificity = clampScore(52 + (/\d|来源：|Hacker News|Product Hunt|知乎|微博|#\d+/.test(tweet) ? 28 : 10));
+  const voice = clampScore(56 + Math.min(22, style.vocabulary.filter((word) => word && tweet.includes(word)).length * 6) + (style.sampleLine && tweet.includes(style.sampleLine.slice(0, 6)) ? 8 : 0));
+  const publishability = clampScore(50 + (tweet.length >= 90 && tweet.length <= 260 ? 32 : tweet.length < 90 ? 12 : 20));
+  const credibility = clampScore(55 + (/来源：|证据点|评论|发布|搜索/.test(tweet) ? 24 : 8) + (topicLabel(topic).length > 3 ? 6 : 0) + (/AI 味|作为一个 AI|赋能|颠覆式创新/.test(tweet) ? -18 : 0));
+
+  return [
+    { label: 'Hook', score: hook, note: '开头有没有强判断，能不能让人停下来。' },
+    { label: 'Specificity', score: specificity, note: `关于「${topicLabel(topic)}」是否包含了来源或可验证的细节。` },
+    { label: 'Voice', score: voice, note: '这条推文是否保留了作者样本里的表达习惯。' },
+    { label: 'Publishability', score: publishability, note: '长度、节奏和信息密度是否适合直接发布。' },
+    { label: 'Credibility', score: credibility, note: `来源 ${sourceLabel} 是否被有效转译成可信表达。` },
+  ];
+}
+
+function aggregateTopicReviews(reviews: TopicArtifactReview[]): TopicArtifactReview[] {
+  const groups = new Map<string, TopicArtifactReview[]>();
+  for (const review of reviews) {
+    groups.set(review.label, [...(groups.get(review.label) || []), review]);
+  }
+  return [...groups.entries()].map(([label, items]) => ({
+    label,
+    score: Math.round(items.reduce((sum, item) => sum + item.score, 0) / items.length),
+    note: items[0]?.note || '',
+  }));
+}
+
+function buildBatchOptimizations(
+  workflowReviews: TopicArtifactReview[],
+  finalReviews: TopicArtifactReview[],
+): string[] {
+  const byLabel = new Map([...workflowReviews, ...finalReviews].map((item) => [item.label, item.score]));
+  const notes: string[] = [];
+  if ((byLabel.get('Evidence readiness') || 100) < 78) notes.push('Research 步的真实用户证据还不够密，建议在进入 Meeting 前强制补 2-3 条真实来源。');
+  if ((byLabel.get('Hook') || 100) < 80) notes.push('Topic 到 Tweet 的转译还不够锋利，建议在 Meeting 后增加一句“先说结论”的钩子模板。');
+  if ((byLabel.get('Publishability') || 100) < 82) notes.push('最终推文长度和节奏还有波动，建议把发布模板压到 2-4 句，并保留一个明确来源锚点。');
+  if ((byLabel.get('Voice') || 100) < 78) notes.push('Style 样本对最终产物的影响还不够强，建议在 Voice 步收集更多真实历史文本。');
+  if (!notes.length) notes.push('当前流程整体比较稳，下一步更值得优化的是 News 选题排序和 Research 证据密度。');
+  return notes;
+}
+
+function averageTopicScore(reviews: TopicArtifactReview[]): number {
+  if (!reviews.length) return 0;
+  return Math.round(reviews.reduce((sum, item) => sum + item.score, 0) / reviews.length);
+}
+
+function trimTweet(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length <= 280 ? compact : compact.slice(0, 277).replace(/[，,；;:\s]+$/u, '') + '…';
+}
+
+function trimSentence(text: string): string {
+  return text.replace(/[。.！!？?\s]+$/u, '').slice(0, 32);
 }
 
 function extractSignal(input: SourceInput, research: ResearchDossier): string[] {

@@ -221,6 +221,12 @@ async function run() {
     assert((await readTitle()) === '评分、优化建议和导出', 'Write should continue to Review', await readTitle());
     assert((await page.locator('.score-row').count()) === 6, 'Review should include six score rows');
     assert((await page.locator('.notes p').count()) >= 2, 'Review should include optimization notes');
+    await page.getByRole('button', { name: /Generate 10 topics/i }).click();
+    await page.waitForTimeout(250);
+    assert((await page.locator('.topic-batch-card').count()) === 10, 'Review should generate 10 topic batch cards');
+    const topicTweets = await page.locator('.topic-batch-card pre').evaluateAll((nodes) => nodes.map((node) => node.textContent || ''));
+    assert(topicTweets.every((tweet) => tweet.trim().length >= 80), 'Every batch tweet should contain substantial content', topicTweets.map((tweet) => tweet.length));
+    assert((await page.locator('.topic-batch-column').count()) === 2, 'Topic batch analysis should render workflow and final output columns');
     events.push('Review generated');
 
     const downloadPromise = page.waitForEvent('download', { timeout: 5000 });
@@ -229,7 +235,7 @@ async function run() {
     const downloadPath = join(downloadsDir, download.suggestedFilename());
     await download.saveAs(downloadPath);
     const markdown = readFileSync(downloadPath, 'utf8');
-    for (const heading of ['## Writing Objective', '## Content Structure', '## Section Drafts', '## X Thread Versions', '## Scores', '## Assets']) {
+    for (const heading of ['## Writing Objective', '## Content Structure', '## Section Drafts', '## X Thread Versions', '## Topic Batch Report', '## Scores', '## Assets']) {
       assert(markdown.includes(heading), 'Exported markdown should include final dossier section', heading);
     }
     events.push(`Exported ${download.suggestedFilename()}`);
