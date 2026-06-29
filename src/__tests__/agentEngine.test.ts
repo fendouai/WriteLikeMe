@@ -220,7 +220,19 @@ describe('optimizeAsset', () => {
 
 describe('self-optimization loop (Loop Engineer)', () => {
   it('weakestDimensions ranks dimensions by score (aiSmellRisk inverted)', () => {
-    const scores = { hook: 90, novelty: 60, styleMatch: 80, platformFit: 50, credibility: 70, aiSmellRisk: 40 };
+    const scores = {
+      hook: 90,
+      novelty: 60,
+      styleMatch: 80,
+      platformFit: 50,
+      credibility: 70,
+      aiSmellRisk: 40,
+      curiosityGap: 88,
+      emotionalCharge: 76,
+      shareability: 74,
+      commentBait: 72,
+      screenshotSentence: 68,
+    };
     const weak = weakestDimensions(scores);
     // platformFit (50) is weakest; aiSmellRisk 40 -> inverted 60, not the weakest.
     expect(weak[0].key).toBe('platformFit');

@@ -153,6 +153,11 @@ export type ScoreCard = {
   platformFit: number;
   credibility: number;
   aiSmellRisk: number;
+  curiosityGap: number;
+  emotionalCharge: number;
+  shareability: number;
+  commentBait: number;
+  screenshotSentence: number;
 };
 
 export const scoreLabels: Record<keyof ScoreCard, string> = {
@@ -162,6 +167,11 @@ export const scoreLabels: Record<keyof ScoreCard, string> = {
   platformFit: '平台适配',
   credibility: '可信度',
   aiSmellRisk: 'AI 味风险',
+  curiosityGap: '信息缺口',
+  emotionalCharge: '情绪张力',
+  shareability: '转发价值',
+  commentBait: '评论诱因',
+  screenshotSentence: '截图句子',
 };
 
 export type CampaignRun = {
@@ -792,6 +802,34 @@ function rewriteDraft(draft: SectionDraft, weakKey: keyof ScoreCard, style: Styl
     return draft;
   }
 
+  if (weakKey === 'curiosityGap') {
+    if (/(为什么|真正的|问题是|背后)/.test(text)) return draft;
+    return { ...draft, draft: `问题是：${text}` };
+  }
+
+  if (weakKey === 'emotionalCharge') {
+    if (/(低估|错了|机会|成本|噪音|危险|稀缺)/.test(text)) return draft;
+    return { ...draft, draft: `${text} 这不是中性变化，而是会直接改变判断和执行成本。` };
+  }
+
+  if (weakKey === 'shareability') {
+    if (/(保存|转发|写下来|下一步)/.test(text)) return draft;
+    return { ...draft, draft: `${text} 如果你觉得这条判断有用，值得保存下来，下一次遇到同类信号时直接套用。` };
+  }
+
+  if (weakKey === 'commentBait') {
+    if (/(你怎么看|你会|你认同吗|如果你不同意)/.test(text)) return draft;
+    return { ...draft, draft: `${text} 如果你不同意，最值得反驳的是哪一句？` };
+  }
+
+  if (weakKey === 'screenshotSentence') {
+    const firstBreak = text.indexOf('\n');
+    const lead = firstBreak === -1 ? text : text.slice(0, firstBreak);
+    if (lead.length >= 24 && lead.length <= 80 && /(不是|而是|真正|关键)/.test(lead)) return draft;
+    const condensed = lead.replace(/[。！？].*$/u, '').slice(0, 68);
+    return { ...draft, draft: `真正稀缺的不是信息，而是判断。${condensed}${firstBreak === -1 ? '' : text.slice(firstBreak)}` };
+  }
+
   if (weakKey === 'novelty') {
     // If the text already contains a contrarian word, no rewrite needed.
     if (/(反共识|主流|被低估|重新组织|真正的|缺的不是|稀缺的)/.test(text)) return draft;
@@ -1316,6 +1354,12 @@ function evaluateFinalTweet(
   const voice = clampScore(56 + Math.min(22, style.vocabulary.filter((word) => word && tweet.includes(word)).length * 6) + (style.sampleLine && tweet.includes(style.sampleLine.slice(0, 6)) ? 8 : 0));
   const publishability = clampScore(50 + (tweet.length >= 90 && tweet.length <= 260 ? 32 : tweet.length < 90 ? 12 : 20));
   const credibility = clampScore(55 + (/来源：|证据点|评论|发布|搜索/.test(tweet) ? 24 : 8) + (topicLabel(topic).length > 3 ? 6 : 0) + (/AI 味|作为一个 AI|赋能|颠覆式创新/.test(tweet) ? -18 : 0));
+  const curiosityGap = clampScore(54 + ((tweet.match(/为什么|问题是|真正的|背后|但/g) || []).length * 6) + (/(不是|而是)/.test(tweet) ? 10 : 0));
+  const emotionalCharge = clampScore(50 + ((tweet.match(/低估|错了|机会|危险|稀缺|成本|焦虑/g) || []).length * 6) + (/[？?！!]/.test(tweet) ? 6 : 0));
+  const shareability = clampScore(52 + ((tweet.match(/保存|转发|写下来|值得|下次直接用/g) || []).length * 6) + (tweet.length >= 120 ? 8 : 2));
+  const commentBait = clampScore(48 + ((tweet.match(/你会|你怎么看|你认同吗|如果你不同意|评论区/g) || []).length * 7));
+  const lead = tweet.split(/[。！？!?]/)[0] || tweet;
+  const screenshotSentence = clampScore(50 + (lead.length >= 18 && lead.length <= 72 ? 16 : 6) + (/(不是|而是|真正|关键|低估|稀缺)/.test(lead) ? 18 : 8));
 
   return [
     { label: 'Hook', score: hook, note: '开头有没有强判断，能不能让人停下来。' },
@@ -1323,6 +1367,11 @@ function evaluateFinalTweet(
     { label: 'Voice', score: voice, note: '这条推文是否保留了作者样本里的表达习惯。' },
     { label: 'Publishability', score: publishability, note: '长度、节奏和信息密度是否适合直接发布。' },
     { label: 'Credibility', score: credibility, note: `来源 ${sourceLabel} 是否被有效转译成可信表达。` },
+    { label: 'Curiosity gap', score: curiosityGap, note: '有没有把读者拉进一个“我得继续看下去”的信息缺口。' },
+    { label: 'Emotional charge', score: emotionalCharge, note: '有没有明显的风险感、机会感、低估感或身份张力。' },
+    { label: 'Shareability', score: shareability, note: '这条内容是否天然带有“值得转给别人”的理由。' },
+    { label: 'Comment bait', score: commentBait, note: '是否给了读者一个明确的反驳、补充或站队入口。' },
+    { label: 'Screenshot sentence', score: screenshotSentence, note: '是否有一句单独截出来也成立的高密度判断。' },
   ];
 }
 
@@ -1348,6 +1397,11 @@ function buildBatchOptimizations(
   if ((byLabel.get('Hook') || 100) < 80) notes.push('Topic 到 Tweet 的转译还不够锋利，建议在 Meeting 后增加一句“先说结论”的钩子模板。');
   if ((byLabel.get('Publishability') || 100) < 82) notes.push('最终推文长度和节奏还有波动，建议把发布模板压到 2-4 句，并保留一个明确来源锚点。');
   if ((byLabel.get('Voice') || 100) < 78) notes.push('Style 样本对最终产物的影响还不够强，建议在 Voice 步收集更多真实历史文本。');
+  if ((byLabel.get('Curiosity gap') || 100) < 78) notes.push('Topic 首句还不够让人停下来，建议在生成时优先制造“主流理解 vs 真正问题”的反差。');
+  if ((byLabel.get('Emotional charge') || 100) < 76) notes.push('推文整体仍偏理性说明，建议加入明确的损失感、机会感或被低估感。');
+  if ((byLabel.get('Shareability') || 100) < 78) notes.push('最终推文缺少“为什么值得转发给别人”的一句话，建议补一条可复用的判断。');
+  if ((byLabel.get('Comment bait') || 100) < 72) notes.push('评论诱因偏弱，建议让结尾主动抛出立场问题或反驳入口。');
+  if ((byLabel.get('Screenshot sentence') || 100) < 78) notes.push('缺少一句能被单独截图传播的高密度句子，建议在首句压缩出一个可摘录判断。');
   if (!notes.length) notes.push('当前流程整体比较稳，下一步更值得优化的是 News 选题排序和 Research 证据密度。');
   return notes;
 }
@@ -1466,7 +1520,7 @@ function buildVersions(
       name: 'Version A：稳妥专业版',
       positioning: '清晰、有用、低风险。适合 LinkedIn、newsletter 或创始人动态。',
       thread: [...base, '', `7/ 发布前，用一个证据点核实：${proofPrompt}`].join('\n'),
-      scores: { hook: 78, novelty: 76, styleMatch: 82, platformFit: 84, credibility: 80, aiSmellRisk: 24 },
+      scores: { hook: 78, novelty: 76, styleMatch: 82, platformFit: 84, credibility: 80, aiSmellRisk: 24, curiosityGap: 72, emotionalCharge: 66, shareability: 74, commentBait: 62, screenshotSentence: 70 },
     },
     {
       name: 'Version B：更有争议版',
@@ -1482,7 +1536,7 @@ function buildVersions(
         '',
         `5/ 如果一个工具不能研究真实用户、不能保留作者声音，它就不是内容智能体，只是界面更好看的自动补全。`,
       ].join('\n'),
-      scores: { hook: 90, novelty: 88, styleMatch: 78, platformFit: 86, credibility: 72, aiSmellRisk: 20 },
+      scores: { hook: 90, novelty: 88, styleMatch: 78, platformFit: 86, credibility: 72, aiSmellRisk: 20, curiosityGap: 84, emotionalCharge: 82, shareability: 80, commentBait: 78, screenshotSentence: 74 },
     },
     {
       name: 'Version C：更像本人版',
@@ -1501,7 +1555,7 @@ function buildVersions(
         '',
         `5/ 好的工作流应该从一个链接开始，最后给你三个版本：稳妥、争议、像本人。`,
       ].join('\n'),
-      scores: { hook: 84, novelty: 82, styleMatch: 92, platformFit: 80, credibility: 76, aiSmellRisk: 16 },
+      scores: { hook: 84, novelty: 82, styleMatch: 92, platformFit: 80, credibility: 76, aiSmellRisk: 16, curiosityGap: 74, emotionalCharge: 70, shareability: 76, commentBait: 64, screenshotSentence: 82 },
     },
   ];
 }
@@ -1646,6 +1700,22 @@ function scoreRun(input: SourceInput, style: StyleProfile, angle: Angle, assets:
   const evidenceMarkers = (publishText.match(/\d+[%％x倍万]|[（(][^)）]{4,}[)）]|例如|比如|具体/g) || []).length;
   const credibility = clampScore(sourceDepth + (hasSpecifics ? 8 : 0) + Math.min(16, evidenceMarkers * 4));
 
+  const curiosityMarkers = (publishText.match(/为什么|但问题是|真正的|背后|关键是|大多数人|被忽略|却/g) || []).length;
+  const curiosityGap = clampScore(54 + Math.min(28, curiosityMarkers * 5) + (/(不是|而是)/.test(leadLine) ? 10 : 0));
+
+  const emotionalMarkers = (publishText.match(/低估|错了|危险|稀缺|焦虑|机会|成本|停下来|噪音|不是观点游戏/g) || []).length;
+  const emotionalCharge = clampScore(50 + Math.min(32, emotionalMarkers * 5) + (/!|！|？|\?/.test(leadLine) ? 6 : 0));
+
+  const shareabilityMarkers = (publishText.match(/如果你|保存|转发|写下来|下一步|值得发|你会|这就是为什么/g) || []).length;
+  const shareability = clampScore(56 + Math.min(24, shareabilityMarkers * 4) + (publishText.length >= 180 ? 8 : 2));
+
+  const commentBaitMarkers = (publishText.match(/你会|你认同吗|你怎么看|评论区|如果你不同意|站在你的角度/g) || []).length;
+  const commentBait = clampScore(48 + Math.min(30, commentBaitMarkers * 6) + (/(你会|你怎么看|你认同吗)/.test(publishText) ? 10 : 0));
+
+  const screenshotLead = leadLine.length >= 24 && leadLine.length <= 80;
+  const screenshotMarkers = /(不是|而是|真正|关键|稀缺|机会|判断|成本)/.test(leadLine) ? 16 : 4;
+  const screenshotSentence = clampScore(52 + (screenshotLead ? 18 : 8) + screenshotMarkers + (/[，,]/.test(leadLine) ? 6 : 0));
+
   // aiSmellRisk: detect generic AI filler; lower is better. We only penalize genuine
   // templated filler phrases and generic transition word over-density — never length or
   // evidence (those are good). Injecting author voice should always lower this.
@@ -1664,6 +1734,11 @@ function scoreRun(input: SourceInput, style: StyleProfile, angle: Angle, assets:
     platformFit: clampScore(platformFit),
     credibility,
     aiSmellRisk,
+    curiosityGap,
+    emotionalCharge,
+    shareability,
+    commentBait,
+    screenshotSentence,
   };
 }
 
@@ -1675,6 +1750,11 @@ function buildOptimizationNotes(scores: ScoreCard, style: StyleProfile, angle: A
   if (scores.credibility < 78) notes.push('发布前补一个具体的证据点：数字、引用或来源细节。');
   if (scores.aiSmellRisk > 35) notes.push('删掉通用的 AI 措辞，加入一个个人判断或亲历细节。');
   if (scores.platformFit < 80) notes.push('为社媒平台缩短首屏，把背景信息放到钩子之后。');
+  if (scores.curiosityGap < 78) notes.push('把首句改成“主流理解 vs 真正问题”的反差，制造继续读下去的缺口。');
+  if (scores.emotionalCharge < 74) notes.push('增加风险感、机会感或被低估感，让内容不只是理性说明。');
+  if (scores.shareability < 78) notes.push('补一句“为什么值得转发给别人”的判断，让内容具备社交货币。');
+  if (scores.commentBait < 72) notes.push('结尾主动抛一个可争论的问题，给评论区明确入口。');
+  if (scores.screenshotSentence < 78) notes.push('压缩出一句可以被单独截图传播的高密度判断。');
   return notes;
 }
 

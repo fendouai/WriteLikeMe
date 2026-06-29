@@ -59,13 +59,18 @@ describe('exportMarkdown dossier with Loop Engineer trajectory', () => {
     const scoresIdx = md.indexOf('## Scores');
     expect(loopIdx).toBeGreaterThan(-1);
     expect(scoresIdx).toBeGreaterThan(loopIdx);
-    // The Scores section still lists the six required dimensions.
+    // The Scores section still lists the core quality + virality dimensions.
     expect(md).toMatch(/- Hook: \d+/);
     expect(md).toMatch(/- Novelty: \d+/);
     expect(md).toMatch(/- Style Match: \d+/);
     expect(md).toMatch(/- Platform Fit: \d+/);
     expect(md).toMatch(/- Credibility: \d+/);
     expect(md).toMatch(/- AI Smell Risk: \d+/);
+    expect(md).toMatch(/- Curiosity Gap: \d+/);
+    expect(md).toMatch(/- Emotional Charge: \d+/);
+    expect(md).toMatch(/- Shareability: \d+/);
+    expect(md).toMatch(/- Comment Bait: \d+/);
+    expect(md).toMatch(/- Screenshot Sentence: \d+/);
   });
 
   it('does not crash when trajectory.passes is empty (edge case for cap=0)', () => {

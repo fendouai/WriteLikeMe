@@ -219,7 +219,7 @@ async function run() {
     await page.getByRole('button', { name: /Review score/i }).click();
     await page.waitForTimeout(200);
     assert((await readTitle()) === '评分、优化建议和导出', 'Write should continue to Review', await readTitle());
-    assert((await page.locator('.score-row').count()) === 6, 'Review should include six score rows');
+    assert((await page.locator('.score-row').count()) === 11, 'Review should include eleven score rows');
     assert((await page.locator('.notes p').count()) >= 2, 'Review should include optimization notes');
     await page.getByRole('button', { name: /Generate 10 topics/i }).click();
     await page.waitForTimeout(250);

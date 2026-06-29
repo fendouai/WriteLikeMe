@@ -78,6 +78,11 @@ const scoreLabels: Record<string, string> = {
   platformFit: 'Platform Fit',
   credibility: 'Credibility',
   aiSmellRisk: 'AI Smell Risk',
+  curiosityGap: 'Curiosity Gap',
+  emotionalCharge: 'Emotional Charge',
+  shareability: 'Shareability',
+  commentBait: 'Comment Bait',
+  screenshotSentence: 'Screenshot Sentence',
 };
 
 const workflowSteps = [
