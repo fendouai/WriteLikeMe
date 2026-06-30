@@ -241,6 +241,12 @@ export type NewsTopicPreview = {
   topic: string;
   sourceLabel: string;
   tweet: string;
+  variants: {
+    thread: string;
+    shortPost: string;
+    screenshotSentence: string;
+    commentBait: string;
+  };
   viralityScore: number;
   reviews: TopicArtifactReview[];
   whyNow: string;
@@ -1160,21 +1166,16 @@ export function buildNewsTopicBoard(
   const items = news.items.slice(0, 18).map((item, index) => {
     const topic = item.title;
     const sourceLabel = `${item.sourceName} #${item.rank}`;
-    const tweet = trimTweet(
-      [
-        `先说结论：${topicLabel(topic)} 不只是一个热点，它会改变 ${audienceHint} 的判断。`,
-        `${item.summary.replace(/[。.]\s*$/, '')}。`,
-        `真正值得转发的点在于：${item.sourceName} 这条信号已经说明，变化开始从信息层走向执行层。`,
-        `来源：${sourceLabel}。${style.sampleLine.replace(/[。.]\s*$/, '')}。`,
-      ].join(' '),
-    );
-    const reviews = evaluateFinalTweet(tweet, style, topic, sourceLabel);
-    const score = averageTopicScore(reviews);
+    const variants = buildNewsTopicVariants(topic, sourceLabel, item.summary, audienceHint, style);
+    const reviews = evaluateFinalTweet(variants.shortPost, style, topic, sourceLabel);
+    const variantScores = Object.values(variants).map((variant) => averageTopicScore(evaluateFinalTweet(variant, style, topic, sourceLabel)));
+    const score = Math.round(variantScores.reduce((sum, value) => sum + value, 0) / variantScores.length);
     return {
       id: item.id,
       topic,
       sourceLabel,
-      tweet,
+      tweet: variants.shortPost,
+      variants,
       viralityScore: score,
       reviews,
       whyNow: item.isNew ? '新增信号，时间窗口更好。' : `已被看到 ${item.seenCount} 次，仍有持续讨论价值。`,
@@ -1191,6 +1192,43 @@ export function buildNewsTopicBoard(
   };
 }
 
+function buildNewsTopicVariants(
+  topic: string,
+  sourceLabel: string,
+  summary: string,
+  audienceHint: string,
+  style: StyleProfile,
+): NewsTopicPreview['variants'] {
+  const cleanSummary = summary.replace(/[。.]\s*$/, '');
+  const shortPost = trimTweet(
+    [
+      `先说结论：${topicLabel(topic)} 不只是一个热点，它会改变 ${audienceHint} 的判断。`,
+      `${cleanSummary}。`,
+      `来源：${sourceLabel}。`,
+    ].join(' '),
+  );
+  const screenshotSentence = trimTweet(
+    `真正稀缺的不是信息，而是围绕「${topicLabel(topic)}」做出判断的能力。`,
+  );
+  const commentBait = trimTweet(
+    `关于「${topicLabel(topic)}」，主流看法可能错了。你最不同意的是哪一句？来源：${sourceLabel}。`,
+  );
+  const thread = [
+    `1/ 先说结论：${topicLabel(topic)} 不只是一个热点。`,
+    `2/ ${cleanSummary}。`,
+    `3/ ${audienceHint} 真正该关心的，不是消息本身，而是它会改变哪个决策。`,
+    `4/ 真正值得转发的点在于：变化已经从信息层走向执行层。`,
+    `5/ 来源：${sourceLabel}。${style.sampleLine.replace(/[。.]\s*$/, '')}。`,
+  ].join('\n');
+
+  return {
+    thread,
+    shortPost,
+    screenshotSentence,
+    commentBait,
+  };
+}
+
 function buildResearchDossier(input: SourceInput, style: StyleProfile): ResearchDossier {
   const body = `${input.title} ${input.sourceText} ${input.productContext}`;
   const keywords = extractKeywords(body, 10);
@@ -1200,42 +1238,43 @@ function buildResearchDossier(input: SourceInput, style: StyleProfile): Research
   const userPain = inferPain(body);
   const platform = inferPrimaryPlatform(body);
   const topKeywords = keywords.slice(0, 3).join('、') || '尚未提取到关键词';
+  const researchFacts = buildResearchFacts(input, audience, label);
 
   return {
     userPersona: [
       { label: '核心读者', detail: audience },
-      { label: '当前认知', detail: `${audience} 大概率知道「${label}」的表层信息，但还没把它转化成可复用的写作决策。` },
+      { label: '读者现在知道了什么', detail: researchFacts.known.join('\n') },
       { label: '正在经历的痛点', detail: userPain },
-      { label: '决策时刻', detail: `他们需要判断：「${label}」究竟只是值得看一眼的消息，还是值得花时间展开成一个内容选题。` },
+      { label: '现在必须做的判断', detail: researchFacts.decisions.join('\n') },
     ],
     realUserLeads: [
       {
         source: 'X / Twitter',
-        query: `${topKeywords}（${audience}）痛点`,
-        why: '找到用自己话讨论这个问题的创作者，尤其是发布帖和评论区的真实表达。',
+        query: `${topicLabel(topic)} ${audience} 痛点`,
+        why: '去找真实用户是怎么描述这个变化的，尤其看抱怨、比较和“值不值得切换”。',
       },
       {
         source: 'Reddit',
-        query: `${topKeywords} site:reddit.com 创作者 工作流`,
-        why: '找到未解决的问题、反对意见和真实的工作流抱怨。',
+        query: `${topKeywords} site:reddit.com workflow alternatives`,
+        why: '看争议点和反对意见，避免文章只写成单边吹捧。',
       },
       {
         source: 'Hacker News / Product Hunt',
-        query: `${label} 评论 发布`,
-        why: '找到早期采用者的语言、质疑和购买触发点。',
+        query: `${label} launch comments`,
+        why: '找早期采用者最在意的能力、价格、速度或替代关系。',
       },
     ],
     knowledgeBase: [
       { label: '核心主题', detail: topic },
       { label: '相关关键词', detail: keywords.slice(0, 8).join('、') || '补充更长的素材以提取更精准的关键词。' },
+      { label: '可直接引用的事实', detail: researchFacts.known.join('\n') },
       { label: '产品语境', detail: input.productContext || '尚未提供产品语境。' },
-      { label: '研究缺口', detail: `发布前应顺着上面的线索核实，补上 2-3 个具体例子或链接，确保判断站得住。` },
     ],
     demandMap: [
-      { label: '已经知道', detail: `${audience} 大概率已经知道：围绕 ${topKeywords} 的基础讨论已经存在。` },
-      { label: '还不知道', detail: `他们可能没意识到：如何把「${label}」从一次性信息，组织成可判断、可复用的内容资产。` },
-      { label: '需要被满足', detail: `内容要帮他们看清一条从 ${platform} 信号到可发布资产的实操路径。` },
-      { label: '信任要求', detail: '使用真实用户语言、具体的素材细节，以及作者一个清晰的判断。' },
+      { label: '已经知道', detail: researchFacts.known.join('\n') },
+      { label: '还不知道', detail: researchFacts.unknown.join('\n') },
+      { label: '发布前必须回答', detail: researchFacts.decisions.join('\n') },
+      { label: '这篇内容要交付什么', detail: `让 ${audience} 看清：这条 ${platform} 信号到底改变了什么、谁该先行动、下一步该验证什么。` },
     ],
     authorProfile: [
       { label: '声音模式', detail: style.tone.join(' / ') },
@@ -1243,6 +1282,62 @@ function buildResearchDossier(input: SourceInput, style: StyleProfile): Research
       { label: '招牌动作', detail: style.signatureMoves.join('；') },
       { label: '避免', detail: style.forbidden.join('、') },
     ],
+  };
+}
+
+function buildResearchFacts(
+  input: SourceInput,
+  audience: string,
+  label: string,
+): { known: string[]; unknown: string[]; decisions: string[] } {
+  const lines = input.sourceText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const explicitSummary = lines.find((line) => /^Summary:/i.test(line))?.replace(/^Summary:\s*/i, '');
+  const explicitSource = lines.find((line) => /^Source:/i.test(line))?.replace(/^Source:\s*/i, '');
+  const descriptiveLines = lines
+    .filter((line) => !/^(Title|Source|Rank|Relevance|Status|First seen|Last seen):/i.test(line))
+    .map((line) => line.replace(/^Summary:\s*/i, '').trim())
+    .filter((line) => line.length > 10);
+  const titleFact = input.title ? `1. 已知：这条素材的核心事件是「${input.title}」。` : `1. 已知：当前讨论围绕「${label}」展开。`;
+  const summaryFact = explicitSummary
+    ? `2. 已知：新闻摘要已经明确提到 ${explicitSummary.replace(/[。.]\s*$/, '')}。`
+    : descriptiveLines[0]
+      ? `2. 已知：现成素材里至少已经出现了这个具体事实：${descriptiveLines[0].replace(/[。.]\s*$/, '')}。`
+      : `2. 已知：它不是纯概念讨论，而是带着具体事件或发布动作的信号。`;
+  const sourceFact = explicitSource
+    ? `3. 已知：当前源头是 ${explicitSource.replace(/[。.]\s*$/, '')}，说明这不是凭空脑补，而是有明确出处。`
+    : `3. 已知：这条信号已经出现在公开来源里，至少值得先做一次结构化判断。`;
+
+  const lower = `${input.title} ${input.sourceText}`.toLowerCase();
+  const unknown: string[] = [];
+  const decisions: string[] = [];
+
+  if (/model|模型|roll out|rollout|launch|发布|推出/.test(lower)) {
+    unknown.push('这次发布改变的是底层能力，还是只是把已有能力重新封装成产品体验。');
+    decisions.push(`${audience} 现在应该把它当“能力拐点”，还是当“产品包装升级”？`);
+  }
+  if (/price|pricing|收费|成本|outperform|frontier/.test(lower)) {
+    unknown.push('它真正的优势会落在效果、速度、成本，还是分发渠道。');
+    decisions.push('文章是该强调模型本身更强，还是强调它在成本/分发上的优势更实用？');
+  }
+  if (/platform|workflow|agent|builder|创作者/.test(lower)) {
+    unknown.push('最先被影响的是谁的工作流，哪些人会因此改变工具选择或发布习惯。');
+    decisions.push('应该优先写给最先受影响的人，而不是写给“所有人都会关心”的模糊读者。');
+  }
+
+  while (unknown.length < 3) {
+    unknown.push(`围绕「${label}」最值得写的，不是事件本身，而是它到底改变了哪一个具体决策。`);
+  }
+  while (decisions.length < 3) {
+    decisions.push(`围绕「${label}」这篇内容，最应该回答“谁先行动、为什么现在、行动代价是什么”中的哪一个？`);
+  }
+
+  return {
+    known: [titleFact, summaryFact, sourceFact],
+    unknown: unknown.slice(0, 3).map((item, index) => `${index + 1}. 还不知道：${item}`),
+    decisions: decisions.slice(0, 3).map((item, index) => `${index + 1}. 决策问题：${item}`),
   };
 }
 

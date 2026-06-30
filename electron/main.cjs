@@ -115,6 +115,9 @@ async function runServiceSmokeTest() {
       selectedAngleId: 'tool',
     });
     if (!enhancement.sectionDrafts?.length || enhancement.providerMeta?.llm !== 'openai') throw new Error('Campaign enhancement did not use LLM provider metadata');
+    if (!enhancement.research?.userPersona?.length) throw new Error('Campaign enhancement did not return structured research');
+    if (!enhancement.writingObjective?.dimensions?.length) throw new Error('Campaign enhancement did not return structured writing objective');
+    if (!enhancement.contentStructure?.sections?.length) throw new Error('Campaign enhancement did not return structured content structure');
     const usage = services.getUsage();
     const logs = services.getLogs(20);
     const status = services.getSecretStatus();
@@ -124,6 +127,9 @@ async function runServiceSmokeTest() {
     console.log(`PASS service news items ${news.items.length}`);
     console.log(`PASS service search provider ${search.provider}`);
     console.log(`PASS service llm provider ${llm.provider}`);
+    console.log(`PASS service enhancement research ${enhancement.research.userPersona.length}`);
+    console.log(`PASS service enhancement objective ${enhancement.writingObjective.dimensions.length}`);
+    console.log(`PASS service enhancement structure ${enhancement.contentStructure.sections.length}`);
     console.log(`PASS service enhancement drafts ${enhancement.sectionDrafts.length}`);
     console.log(`PASS service usage calls ${usage.calls}`);
     console.log(`PASS service estimated cost ${usage.estimatedCostUsd}`);
@@ -154,6 +160,42 @@ function startMockProviderServer() {
               message: {
                 content: JSON.stringify({
                   signal: ['Mock signal 1', 'Mock signal 2', 'Mock signal 3', 'Mock signal 4'],
+                  research: {
+                    userPersona: [
+                      { label: '核心读者', detail: 'Indie hackers testing whether this release changes product or workflow decisions.' },
+                      { label: '读者现在知道了什么', detail: '1. 已知：这条消息来自一个具体发布。\\n2. 已知：摘要里已经明确提到了模型 rollout。\\n3. 已知：它来自公开来源。 ' },
+                    ],
+                    realUserLeads: [{ source: 'X', query: 'mock release workflow pain', why: 'Find real objections and switching triggers.' }],
+                    knowledgeBase: [{ label: '可直接引用的事实', detail: '1. 已知：Base44 has started rolling out its own AI model.' }],
+                    demandMap: [{ label: '还不知道', detail: '1. 还不知道：是体验升级还是能力跃迁。' }],
+                    authorProfile: [{ label: '声音模式', detail: 'direct / structured' }],
+                  },
+                  writingObjective: {
+                    framework: 'Reader Value Objective',
+                    summary: 'Help the reader judge whether the release changes their workflow.',
+                    currentCognition: 'They know the headline but not the implication.',
+                    uniqueValue: 'Translate launch noise into a usable decision.',
+                    cognitionGap: 'Move from “what happened” to “what changed”.',
+                    dimensions: [
+                      { label: '知识与判断', target: 'Decide what changed.', readerGain: 'A sharper point of view.', successMetric: 'Can restate the thesis.' },
+                    ],
+                  },
+                  contentStructure: {
+                    selectedTemplateId: 'signal-bet',
+                    templates: [
+                      {
+                        id: 'signal-bet',
+                        name: 'Signal, Meaning, Bet, Execution',
+                        bestFor: 'news-driven analysis',
+                        rationale: 'The source is a release signal and the user needs a strategic interpretation.',
+                        sections: [{ title: 'Signal', job: 'State the signal.', readerGain: 'Know what happened.' }],
+                      },
+                    ],
+                    sections: [{ title: 'Signal', job: 'State the signal.', readerGain: 'Know what happened.' }],
+                  },
+                  angles: [
+                    { id: 'tool', label: '工具推荐', headline: 'Mock angle headline', rationale: 'Mock angle rationale', hook: 'Mock hook' },
+                  ],
                   sectionDrafts: [
                     {
                       title: 'Mock Section',

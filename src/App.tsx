@@ -322,6 +322,10 @@ export function App() {
     try {
       const enhancement = (await serviceApi.enhanceCampaign({ input: source, style: styleProfile, selectedAngleId: angleId })) as {
         signal?: string[];
+        research?: CampaignRun['research'];
+        writingObjective?: CampaignRun['writingObjective'];
+        contentStructure?: CampaignRun['contentStructure'];
+        angles?: CampaignRun['angles'];
         sectionDrafts?: CampaignRun['sectionDrafts'];
         optimizationNotes?: string[];
         providerMeta?: { llm?: string; model?: string; usage?: { estimatedCostUsd?: number } };
@@ -329,6 +333,10 @@ export function App() {
       const enhancedRun: CampaignRun = {
         ...baseRun,
         signal: enhancement.signal?.length ? enhancement.signal.slice(0, 4) : baseRun.signal,
+        research: enhancement.research?.userPersona?.length ? enhancement.research : baseRun.research,
+        writingObjective: enhancement.writingObjective?.dimensions?.length ? enhancement.writingObjective : baseRun.writingObjective,
+        contentStructure: enhancement.contentStructure?.sections?.length ? enhancement.contentStructure : baseRun.contentStructure,
+        angles: enhancement.angles?.length ? enhancement.angles : baseRun.angles,
         sectionDrafts: enhancement.sectionDrafts?.length ? enhancement.sectionDrafts : baseRun.sectionDrafts,
         optimizationNotes: [
           enhancement.providerMeta?.llm
@@ -785,7 +793,24 @@ export function App() {
                           <small>Virality {item.viralityScore}</small>
                           <small>{item.whyNow}</small>
                         </div>
-                        <pre>{item.tweet}</pre>
+                        <div className="topic-variant-list">
+                          <div className="topic-variant-card">
+                            <span>Short post</span>
+                            <pre>{item.variants.shortPost}</pre>
+                          </div>
+                          <div className="topic-variant-card">
+                            <span>Screenshot sentence</span>
+                            <pre>{item.variants.screenshotSentence}</pre>
+                          </div>
+                          <div className="topic-variant-card">
+                            <span>Comment bait</span>
+                            <pre>{item.variants.commentBait}</pre>
+                          </div>
+                          <div className="topic-variant-card">
+                            <span>Thread</span>
+                            <pre>{item.variants.thread}</pre>
+                          </div>
+                        </div>
                       </article>
                     ))}
                   </div>

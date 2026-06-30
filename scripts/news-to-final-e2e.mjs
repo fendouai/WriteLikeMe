@@ -99,6 +99,7 @@ async function run() {
     assert((await readTitle()) === '先浏览新闻池，再决定写什么', 'E2E must start at News', await readTitle());
     assert((await page.locator('.news-title-button').count()) >= 8, 'News should render selectable material items');
     assert((await page.locator('.topic-entry-card').count()) === 10, 'News should render Top 10 Viral Topics at entry');
+    assert((await page.locator('.topic-entry-card').first().locator('.topic-variant-card').count()) === 4, 'Each viral topic should expose four ready-to-use variants');
     events.push('News pool loaded');
 
     const refreshCount = (text) => Number((text.match(/刷新 (\d+) 次/) || [])[1] || 0);
@@ -161,6 +162,10 @@ async function run() {
     assert((await readTitle()) === '确认用户、内容知识库和需求地图', 'Insight should continue to Research', await readTitle());
     assert((await page.locator('.research-column').count()) === 4, 'Research should include four dossier columns');
     assert((await page.locator('.lead-card').count()) === 3, 'Research should include three search leads');
+    const researchText = (await page.locator('.research-grid').textContent()) || '';
+    assert(/1\.\s*已知：/.test(researchText), 'Research should state concrete known facts');
+    assert(/1\.\s*还不知道：/.test(researchText), 'Research should state concrete unknowns');
+    assert(/1\.\s*决策问题：/.test(researchText), 'Research should state concrete decision questions');
     events.push('Research dossier generated');
 
     await page.getByRole('button', { name: /Confirm research/i }).click();
