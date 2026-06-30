@@ -1026,7 +1026,7 @@ export function App() {
                 icon={<Gauge size={19} />}
                 kicker="Step 10"
                 title="评分、优化建议和导出"
-                description="这里是最终复盘：判断 hook、风格匹配、可信度和 AI 味风险。点击 Auto-optimize 让 Loop Engineer 自动迭代重写最弱维度并重评分，直到收敛。"
+                description="这里是最终复盘：同时判断质量和传播性。点击 Auto-optimize 让 Loop Engineer 自动迭代重写最弱维度并重评分，直到收敛。"
                 action={
                   <div className="flow-action-group">
                     <button className="secondary-button auto-run-button" onClick={generateTopicBatch} disabled={batchGenerating || runs.length === 0}>

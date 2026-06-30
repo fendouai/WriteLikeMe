@@ -180,7 +180,7 @@ async function run() {
     // Scores must be numeric 1-100.
     const scoreBlock = sections.find((s) => s.startsWith('Scores')) || '';
     const scoreNumbers = (scoreBlock.match(/:\s*(\d+)/g) || []).map((m) => Number(m.replace(/:\s*/, '')));
-    assert('Scores section lists 6 numeric scores', scoreNumbers.length === 6, scoreNumbers);
+    assert('Scores section lists 11 numeric scores', scoreNumbers.length === 11, scoreNumbers);
     assert('All scores are within 1-100', scoreNumbers.every((n) => n >= 1 && n <= 100), scoreNumbers);
 
     // Assets section lists every platform with content.
