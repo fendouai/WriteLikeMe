@@ -25,6 +25,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   analyzeStyle,
+  buildNewsTopicBoard,
   buildTopicBatchReport,
   evaluateTopic,
   optimizeAsset,
@@ -151,6 +152,10 @@ export function App() {
   const selectedAngle = currentRun.angles.find((angle) => angle.id === currentRun.selectedAngleId) ?? currentRun.angles[0];
   const activeAsset = currentRun.assets[activePlatform] ?? currentRun.assets[0];
   const topicEvaluation = useMemo(() => evaluateTopic(selectedAngle, source, newsAggregation), [selectedAngle, source, newsAggregation]);
+  const newsTopicBoard = useMemo(
+    () => buildNewsTopicBoard(newsAggregation, styleProfile, source.audience || '创作者、builder 和内容运营者', 10),
+    [newsAggregation, styleProfile, source.audience],
+  );
   const llmKeyCount = Object.values(runtimeConfig.llmKeys).filter(Boolean).length;
   const searchKeyCount = Object.values(runtimeConfig.searchKeys).filter(Boolean).length;
   const desktopInfo = typeof window !== 'undefined' ? window.writeLikeMeDesktop : undefined;
@@ -225,6 +230,20 @@ export function App() {
       sourceText: sourceNotes,
       audience: '',
       productContext: '',
+    };
+    setSource(nextSource);
+    saveSource(nextSource);
+    setActiveStep('input');
+    window.setTimeout(() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
+
+  function selectNewsTopic(topic: { topic: string; sourceLabel: string; tweet: string }) {
+    const nextSource: SourceInput = {
+      url: source.url,
+      title: topic.topic,
+      sourceText: `Topic source: ${topic.sourceLabel}\n\nSuggested tweet:\n${topic.tweet}`,
+      audience: source.audience,
+      productContext: source.productContext,
     };
     setSource(nextSource);
     saveSource(nextSource);
@@ -731,6 +750,45 @@ export function App() {
                       </div>
                     </article>
                   ))}
+                </div>
+                <div className="news-topic-board">
+                  <div className="topic-batch-summary">
+                    <strong>Top 10 Viral Topics</strong>
+                    <p>{newsTopicBoard.summary}</p>
+                  </div>
+                  <div className="topic-batch-actions">
+                    {newsTopicBoard.processOptimizations.map((note) => (
+                      <p key={note}>{note}</p>
+                    ))}
+                  </div>
+                  <div className="topic-batch-list">
+                    {newsTopicBoard.items.map((item, index) => (
+                      <article
+                        className="topic-batch-card topic-entry-card"
+                        key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Select viral topic: ${item.topic}`}
+                        onClick={() => selectNewsTopic(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            selectNewsTopic(item);
+                          }
+                        }}
+                      >
+                        <div className="topic-batch-head">
+                          <span>#{index + 1} · {item.sourceLabel}</span>
+                          <strong>{item.topic}</strong>
+                        </div>
+                        <div className="topic-batch-metrics">
+                          <small>Virality {item.viralityScore}</small>
+                          <small>{item.whyNow}</small>
+                        </div>
+                        <pre>{item.tweet}</pre>
+                      </article>
+                    ))}
+                  </div>
                 </div>
               </FlowCard>
             )}

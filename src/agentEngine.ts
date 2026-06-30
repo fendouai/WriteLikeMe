@@ -236,6 +236,23 @@ export type TopicBatchReport = {
   processOptimizations: string[];
 };
 
+export type NewsTopicPreview = {
+  id: string;
+  topic: string;
+  sourceLabel: string;
+  tweet: string;
+  viralityScore: number;
+  reviews: TopicArtifactReview[];
+  whyNow: string;
+};
+
+export type NewsTopicBoard = {
+  createdAt: string;
+  summary: string;
+  items: NewsTopicPreview[];
+  processOptimizations: string[];
+};
+
 const stopWords = new Set([
   // English function words
   'the', 'and', 'for', 'that', 'with', 'this', 'from', 'you', 'are', 'but', 'not', 'have', 'has', 'into', 'about',
@@ -1131,6 +1148,46 @@ export function buildTopicBatchReport(
       `最弱 topic：${weakest?.topic || 'N/A'}（${weakest?.finalScore || 0}）`,
       ...processOptimizations,
     ],
+  };
+}
+
+export function buildNewsTopicBoard(
+  news: NewsAggregation,
+  style: StyleProfile,
+  audienceHint = '创作者、builder 和内容运营者',
+  count = 10,
+): NewsTopicBoard {
+  const items = news.items.slice(0, 18).map((item, index) => {
+    const topic = item.title;
+    const sourceLabel = `${item.sourceName} #${item.rank}`;
+    const tweet = trimTweet(
+      [
+        `先说结论：${topicLabel(topic)} 不只是一个热点，它会改变 ${audienceHint} 的判断。`,
+        `${item.summary.replace(/[。.]\s*$/, '')}。`,
+        `真正值得转发的点在于：${item.sourceName} 这条信号已经说明，变化开始从信息层走向执行层。`,
+        `来源：${sourceLabel}。${style.sampleLine.replace(/[。.]\s*$/, '')}。`,
+      ].join(' '),
+    );
+    const reviews = evaluateFinalTweet(tweet, style, topic, sourceLabel);
+    const score = averageTopicScore(reviews);
+    return {
+      id: item.id,
+      topic,
+      sourceLabel,
+      tweet,
+      viralityScore: score,
+      reviews,
+      whyNow: item.isNew ? '新增信号，时间窗口更好。' : `已被看到 ${item.seenCount} 次，仍有持续讨论价值。`,
+    } satisfies NewsTopicPreview;
+  });
+
+  const ranked = [...items].sort((a, b) => b.viralityScore - a.viralityScore).slice(0, count);
+  const aggregate = aggregateTopicReviews(ranked.flatMap((item) => item.reviews));
+  return {
+    createdAt: new Date().toISOString(),
+    summary: `从 ${news.items.length} 条新闻里筛出 ${ranked.length} 个更有爆款潜力的 topic，平均传播得分 ${averageTopicScore(aggregate)}。`,
+    items: ranked,
+    processOptimizations: buildBatchOptimizations([], aggregate),
   };
 }
 

@@ -1382,6 +1382,12 @@ textarea:focus {
   gap: 14px;
 }
 
+.news-topic-board {
+  margin-top: 18px;
+  display: grid;
+  gap: 14px;
+}
+
 .topic-batch-summary,
 .topic-batch-actions {
   padding: 14px;
@@ -1449,6 +1455,16 @@ textarea:focus {
 .topic-batch-card {
   display: grid;
   gap: 12px;
+}
+
+.topic-entry-card {
+  cursor: pointer;
+}
+
+.topic-entry-card:hover,
+.topic-entry-card:focus-visible {
+  border-color: #20201d;
+  box-shadow: 0 0 0 2px rgba(32, 32, 29, 0.08);
 }
 
 .topic-batch-head {

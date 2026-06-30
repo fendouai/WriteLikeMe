@@ -98,6 +98,7 @@ async function run() {
     assert(steps[0].includes('News') && steps[1].includes('Topic'), 'Workflow should begin with News then Topic', steps.slice(0, 2));
     assert((await readTitle()) === '先浏览新闻池，再决定写什么', 'E2E must start at News', await readTitle());
     assert((await page.locator('.news-title-button').count()) >= 8, 'News should render selectable material items');
+    assert((await page.locator('.topic-entry-card').count()) === 10, 'News should render Top 10 Viral Topics at entry');
     events.push('News pool loaded');
 
     const refreshCount = (text) => Number((text.match(/刷新 (\d+) 次/) || [])[1] || 0);
@@ -136,6 +137,15 @@ async function run() {
     const secondUrl = await inputs.nth(0).inputValue();
     assert(secondUrl.startsWith('https://example.com/'), 'Clicking a different card should re-fill Topic inputs', secondUrl);
     events.push('Whole news card is clickable');
+
+    await page.locator('[aria-label="Writing workflow steps"] button').first().click();
+    await page.waitForTimeout(150);
+    const viralTopicTitle = (await page.locator('.topic-entry-card strong').first().textContent()) || '';
+    await page.locator('.topic-entry-card').first().click();
+    await page.waitForTimeout(200);
+    const viralTopicFilled = await inputs.nth(1).inputValue();
+    assert(viralTopicFilled === viralTopicTitle, 'Clicking a viral topic should flow directly into Topic title', { viralTopicTitle, viralTopicFilled });
+    events.push('Top 10 viral topics flow into Topic');
 
     await inputs.nth(2).fill('AI builders, indie hackers, and content operators');
     await page.locator('.input-flow-grid textarea').nth(0).fill('E2E product context: turn one selected news item into an engineered article, platform assets, and final dossier.');
